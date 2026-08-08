@@ -1,0 +1,31 @@
+# Render "Blueprint" - lets you deploy this whole app (web service + managed
+# Postgres) in one step via "New +" -> "Blueprint" on the Render dashboard.
+# You can also skip this file entirely and set the service up manually -
+# see README.md for those instructions.
+
+databases:
+  - name: worship-setlist-db
+    plan: free
+    databaseName: worship_setlist
+    user: worship
+
+services:
+  - type: web
+    name: worship-setlist-app
+    runtime: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt && alembic upgrade head"
+    startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: worship-setlist-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: AUTO_CREATE_TABLES
+        value: "false"
+      - key: ENVIRONMENT
+        value: "production"

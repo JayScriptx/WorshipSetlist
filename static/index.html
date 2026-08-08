@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <meta name="theme-color" content="#12141a" />
+  <title>Worship Setlist</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+  <div id="app">
+    <nav class="sidebar">
+      <div class="brand">Worship<span>Setlist</span></div>
+      <a class="nav-link" data-nav="dashboard" onclick="navigate('/')">
+        <span class="icon">🏠</span> Dashboard
+      </a>
+      <a class="nav-link" data-nav="setlists" onclick="navigate('/setlists')">
+        <span class="icon">📋</span> Setlists
+      </a>
+      <a class="nav-link" data-nav="songs" onclick="navigate('/songs')">
+        <span class="icon">🎵</span> Songs
+      </a>
+    </nav>
+
+    <div class="main-area">
+      <header class="topbar">
+        <div class="brand">Worship<span>Setlist</span></div>
+      </header>
+
+      <main class="content" id="content">
+        <div class="loading"><div class="spinner"></div>Loading…</div>
+      </main>
+
+      <nav class="bottom-nav">
+        <a class="nav-link" data-nav="dashboard" onclick="navigate('/')">
+          <span class="icon">🏠</span> Home
+        </a>
+        <a class="nav-link" data-nav="setlists" onclick="navigate('/setlists')">
+          <span class="icon">📋</span> Setlists
+        </a>
+        <a class="nav-link" data-nav="songs" onclick="navigate('/songs')">
+          <span class="icon">🎵</span> Songs
+        </a>
+      </nav>
+    </div>
+  </div>
+
+  <div id="toast-container"></div>
+
+  <script src="/static/js/api.js"></script>
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
