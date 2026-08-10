@@ -196,15 +196,14 @@ async function viewDashboard(content) {
 
     <h2>Recent Setlists</h2>
     <div id="recent-list">
-      ${
-        recent.length
-          ? recent.map(renderSetlistCard).join("")
-          : `<div class="empty-state">
+      ${recent.length
+      ? recent.map(renderSetlistCard).join("")
+      : `<div class="empty-state">
                <div class="icon">🎵</div>
                <p>No setlists yet.</p>
                <button class="btn btn-primary" id="btn-create-setlist-empty">+ Create Setlist</button>
              </div>`
-      }
+    }
     </div>
   `;
 
@@ -400,14 +399,13 @@ function renderSetlistDetail(content, setlist) {
 
     <h2>Songs</h2>
     <div id="song-list">
-      ${
-        songs.length
-          ? songs.map((s, i) => renderSetlistSongRow(s, i, songs.length)).join("")
-          : `<div class="empty-state">
+      ${songs.length
+      ? songs.map((s, i) => renderSetlistSongRow(s, i, songs.length)).join("")
+      : `<div class="empty-state">
                <div class="icon">🎼</div>
                <p>No songs added yet.</p>
              </div>`
-      }
+    }
     </div>
     <button class="btn btn-primary btn-block" id="btn-add-song" style="margin-top:10px;">+ Add Song</button>
   `;
@@ -885,8 +883,8 @@ async function viewSongForm(content, songId) {
         <div class="section-editor-head">
           <select data-field="name" style="width:160px; background:var(--bg-card); border:1px solid var(--border); color:var(--text); border-radius:9px; padding:9px 10px;">
             ${SECTION_PRESETS.map(
-              (p) => `<option value="${p}" ${sec.section_name === p ? "selected" : ""}>${p}</option>`
-            ).join("")}
+          (p) => `<option value="${p}" ${sec.section_name === p ? "selected" : ""}>${p}</option>`
+        ).join("")}
           </select>
           <input type="text" data-field="custom-name" placeholder="Custom section name…" value="${SECTION_PRESETS.includes(sec.section_name) ? "" : escapeHtml(sec.section_name)}" style="${SECTION_PRESETS.includes(sec.section_name) ? "display:none;" : ""} flex:1;" />
           <button type="button" class="btn btn-icon btn-sm" data-move="up" ${i === 0 ? "disabled" : ""} title="Move up">▲</button>
@@ -1086,20 +1084,18 @@ function renderReader(content, data, semitones) {
     </div>
 
     <div id="sections-display">
-      ${
-        data.sections.length
-          ? data.sections.map(renderReaderSection).join("")
-          : `<div class="empty-state"><p>No lyrics/chords added for this song yet.</p></div>`
-      }
+      ${data.sections.length
+      ? data.sections.map(renderReaderSection).join("")
+      : `<div class="empty-state"><p>No lyrics/chords added for this song yet.</p></div>`
+    }
     </div>
 
-    ${
-      data.notes
-        ? `<div class="notes-block">
+    ${data.notes
+      ? `<div class="notes-block">
              <div class="section-name">Notes</div>
              <pre>${escapeHtml(data.notes)}</pre>
            </div>`
-        : ""
+      : ""
     }
 
     <div class="btn-row" style="margin-top:30px;">
@@ -1148,15 +1144,15 @@ function renderReaderSection(section) {
     <div class="section-block">
       <div class="section-name">${escapeHtml(section.section_name)}</div>
       ${section.lines
-        .map((line) => {
-          if (!line.chord_line && !line.lyric_line) return `<div class="chord-line-pair">&nbsp;</div>`;
-          return `
-          <div class="chord-line-pair ${line.has_chords ? "" : "chords-only"}">
+      .map((line) => {
+        if (!line.chord_line && !line.lyric_line) return `<div class="chord-line-pair">&nbsp;</div>`;
+        return `
+          <div class="chord-line-pair">
             <div class="chords">${line.has_chords ? escapeHtml(line.chord_line) : ""}</div>
             <div class="lyrics">${escapeHtml(line.lyric_line) || "&nbsp;"}</div>
           </div>`;
-        })
-        .join("")}
+      })
+      .join("")}
     </div>
   `;
 }
