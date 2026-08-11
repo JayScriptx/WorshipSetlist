@@ -7,62 +7,147 @@
 // ---------------------------------------------------------------------
 
 function escapeHtml(str) {
-  if (str === null || str === undefined) return "";
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
+    if (str === null || str === undefined) return "";
+    return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
 }
 
 function formatDateDisplay(dateStr) {
-  if (!dateStr) return "";
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const dt = new Date(y, m - 1, d);
-  return dt.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+    if (!dateStr) return "";
+    const [y, m, d] = dateStr.split("-").map(Number);
+    const dt = new Date(y, m - 1, d);
+    return dt.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
 }
 
 function formatDateShort(dateStr) {
-  if (!dateStr) return "";
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const dt = new Date(y, m - 1, d);
-  return dt.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+    if (!dateStr) return "";
+    const [y, m, d] = dateStr.split("-").map(Number);
+    const dt = new Date(y, m - 1, d);
+    return dt.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
 function todayIso() {
-  const d = new Date();
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const d = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 function debounce(fn, wait) {
-  let t;
-  return (...args) => {
-    clearTimeout(t);
-    t = setTimeout(() => fn(...args), wait);
-  };
+    let t;
+    return (...args) => {
+        clearTimeout(t);
+        t = setTimeout(() => fn(...args), wait);
+    };
 }
 
 function navigate(path) {
-  window.location.hash = "#" + path;
+    window.location.hash = "#" + path;
+}
+
+// ---------------------------------------------------------------------
+// "Paste Whole Song" parser
+// ---------------------------------------------------------------------
+// Converts a pasted chord chart written the traditional way (a line of
+// chords, directly above the lyric line it belongs to, with sections
+// marked by a standalone [Bracketed Label] line) into this app's inline
+// [G]word format, split into separate sections automatically.
+
+const CHORD_TOKEN_RE =
+    /^[A-G][#b]?(?:maj7|maj9|maj13|maj|m7b5|m7|m9|m6|m11|m13|min7|min9|min|sus2|sus4|add9|add11|add2|dim7|dim|aug|2|4|5|6|7|9|11|13)*(?:\/[A-G][#b]?)?$/;
+
+function isChordLine(line) {
+    const trimmed = line.trim();
+    if (!trimmed) return false;
+    const tokens = trimmed.split(/\s+/);
+    return tokens.every((t) => CHORD_TOKEN_RE.test(t));
+}
+
+function isSectionHeaderLine(line) {
+    const m = line.trim().match(/^\[([^\]]+)\]$/);
+    return m ? m[1].trim() : null;
+}
+
+function buildInlineChordLine(chordLine, lyricLine) {
+    const tokens = [];
+    const re = /\S+/g;
+    let match;
+    while ((match = re.exec(chordLine)) !== null) tokens.push({ pos: match.index, chord: match[0] });
+    let result = lyricLine;
+    const maxPos = tokens.length ? Math.max(...tokens.map((t) => t.pos)) : 0;
+    if (result.length < maxPos) result = result.padEnd(maxPos, " ");
+    for (let i = tokens.length - 1; i >= 0; i--) {
+        const { pos, chord } = tokens[i];
+        const insertPos = Math.min(pos, result.length);
+        result = result.slice(0, insertPos) + `[${chord}]` + result.slice(insertPos);
+    }
+    return result;
+}
+
+function parseFullSongText(text) {
+    const rawLines = text.replace(/\r\n/g, "\n").split("\n");
+    const sections = [];
+    let current = { section_name: "Verse 1", lines: [] };
+
+    for (let i = 0; i < rawLines.length; i++) {
+        const line = rawLines[i];
+        const headerName = isSectionHeaderLine(line);
+        if (headerName) {
+            if (current.lines.length) sections.push(current);
+            current = { section_name: headerName, lines: [] };
+            continue;
+        }
+        if (isChordLine(line)) {
+            const nextLine = rawLines[i + 1];
+            const nextIsLyric =
+                nextLine !== undefined &&
+                nextLine.trim() !== "" &&
+                !isChordLine(nextLine) &&
+                !isSectionHeaderLine(nextLine);
+            if (nextIsLyric) {
+                current.lines.push(buildInlineChordLine(line, nextLine));
+                i++;
+                continue;
+            }
+            current.lines.push(line.trim());
+            continue;
+        }
+        if (line.trim() === "") {
+            if (current.lines.length && current.lines[current.lines.length - 1] !== "") current.lines.push("");
+            continue;
+        }
+        current.lines.push(line);
+    }
+    sections.push(current);
+
+    return sections
+        .filter((s) => s.lines.some((l) => l.trim() !== ""))
+        .map((s, idx) => ({
+            section_name: s.section_name,
+            section_order: idx,
+            content: s.lines.join("\n").trim(),
+            _localId: "parsed" + idx + "_" + Date.now(),
+        }));
 }
 
 function toast(message, type = "info") {
-  const container = document.getElementById("toast-container");
-  const el = document.createElement("div");
-  el.className = `toast ${type}`;
-  el.textContent = message;
-  container.appendChild(el);
-  setTimeout(() => {
-    el.style.transition = "opacity 0.3s";
-    el.style.opacity = "0";
-    setTimeout(() => el.remove(), 300);
-  }, 3200);
+    const container = document.getElementById("toast-container");
+    const el = document.createElement("div");
+    el.className = `toast ${type}`;
+    el.textContent = message;
+    container.appendChild(el);
+    setTimeout(() => {
+        el.style.transition = "opacity 0.3s";
+        el.style.opacity = "0";
+        setTimeout(() => el.remove(), 300);
+    }, 3200);
 }
 
 function errorMessage(err) {
-  return err && err.message ? err.message : "Something went wrong.";
+    return err && err.message ? err.message : "Something went wrong.";
 }
 
 // ---------------------------------------------------------------------
@@ -70,51 +155,51 @@ function errorMessage(err) {
 // ---------------------------------------------------------------------
 
 function openModal(innerHtml, { onMount, title } = {}) {
-  closeModal();
-  const overlay = document.createElement("div");
-  overlay.className = "modal-overlay";
-  overlay.id = "active-modal-overlay";
-  overlay.innerHTML = `
+    closeModal();
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.id = "active-modal-overlay";
+    overlay.innerHTML = `
     <div class="modal">
       ${title ? `<div class="modal-header"><h2>${escapeHtml(title)}</h2><button class="btn btn-ghost btn-icon" data-close-modal>✕</button></div>` : ""}
       ${innerHtml}
     </div>
   `;
-  overlay.addEventListener("click", (e) => {
-    if (e.target === overlay) closeModal();
-  });
-  overlay.querySelectorAll("[data-close-modal]").forEach((btn) => btn.addEventListener("click", closeModal));
-  document.body.appendChild(overlay);
-  if (onMount) onMount(overlay);
-  return overlay;
+    overlay.addEventListener("click", (e) => {
+        if (e.target === overlay) closeModal();
+    });
+    overlay.querySelectorAll("[data-close-modal]").forEach((btn) => btn.addEventListener("click", closeModal));
+    document.body.appendChild(overlay);
+    if (onMount) onMount(overlay);
+    return overlay;
 }
 
 function closeModal() {
-  const existing = document.getElementById("active-modal-overlay");
-  if (existing) existing.remove();
+    const existing = document.getElementById("active-modal-overlay");
+    if (existing) existing.remove();
 }
 
 function confirmDialog(message, { danger = true, confirmLabel = "Delete" } = {}) {
-  return new Promise((resolve) => {
-    const overlay = openModal(
-      `
+    return new Promise((resolve) => {
+        const overlay = openModal(
+            `
       <p style="margin-top:0">${escapeHtml(message)}</p>
       <div class="btn-row" style="margin-top:20px; justify-content:flex-end;">
         <button class="btn" data-cancel>Cancel</button>
         <button class="btn ${danger ? "btn-danger" : "btn-primary"}" data-confirm>${escapeHtml(confirmLabel)}</button>
       </div>
     `,
-      {}
-    );
-    overlay.querySelector("[data-cancel]").addEventListener("click", () => {
-      closeModal();
-      resolve(false);
+            {}
+        );
+        overlay.querySelector("[data-cancel]").addEventListener("click", () => {
+            closeModal();
+            resolve(false);
+        });
+        overlay.querySelector("[data-confirm]").addEventListener("click", () => {
+            closeModal();
+            resolve(true);
+        });
     });
-    overlay.querySelector("[data-confirm]").addEventListener("click", () => {
-      closeModal();
-      resolve(true);
-    });
-  });
 }
 
 // ---------------------------------------------------------------------
@@ -122,51 +207,51 @@ function confirmDialog(message, { danger = true, confirmLabel = "Delete" } = {})
 // ---------------------------------------------------------------------
 
 const routes = [
-  { pattern: /^\/?$/, view: viewDashboard },
-  { pattern: /^\/setlists$/, view: viewSetlistsList },
-  { pattern: /^\/setlists\/new$/, view: viewSetlistCreate },
-  { pattern: /^\/setlists\/(\d+)$/, view: viewSetlistDetail },
-  { pattern: /^\/songs$/, view: viewSongsList },
-  { pattern: /^\/songs\/new$/, view: viewSongForm },
-  { pattern: /^\/songs\/(\d+)\/edit$/, view: viewSongForm },
-  { pattern: /^\/setlist-song\/(\d+)$/, view: viewSetlistSongReader },
+    { pattern: /^\/?$/, view: viewDashboard },
+    { pattern: /^\/setlists$/, view: viewSetlistsList },
+    { pattern: /^\/setlists\/new$/, view: viewSetlistCreate },
+    { pattern: /^\/setlists\/(\d+)$/, view: viewSetlistDetail },
+    { pattern: /^\/songs$/, view: viewSongsList },
+    { pattern: /^\/songs\/new$/, view: viewSongForm },
+    { pattern: /^\/songs\/(\d+)\/edit$/, view: viewSongForm },
+    { pattern: /^\/setlist-song\/(\d+)$/, view: viewSetlistSongReader },
 ];
 
 async function router() {
-  const hash = window.location.hash.replace(/^#/, "") || "/";
-  const path = hash.split("?")[0];
+    const hash = window.location.hash.replace(/^#/, "") || "/";
+    const path = hash.split("?")[0];
 
-  for (const route of routes) {
-    const match = path.match(route.pattern);
-    if (match) {
-      updateNavActive(path);
-      const content = document.getElementById("content");
-      content.innerHTML = `<div class="loading"><div class="spinner"></div>Loading…</div>`;
-      window.scrollTo(0, 0);
-      try {
-        await route.view(content, ...match.slice(1));
-      } catch (err) {
-        content.innerHTML = `
+    for (const route of routes) {
+        const match = path.match(route.pattern);
+        if (match) {
+            updateNavActive(path);
+            const content = document.getElementById("content");
+            content.innerHTML = `<div class="loading"><div class="spinner"></div>Loading…</div>`;
+            window.scrollTo(0, 0);
+            try {
+                await route.view(content, ...match.slice(1));
+            } catch (err) {
+                content.innerHTML = `
           <div class="empty-state">
             <div class="icon">⚠️</div>
             <h2>Couldn't load this page</h2>
             <p>${escapeHtml(errorMessage(err))}</p>
             <button class="btn btn-primary" onclick="navigate('/')">Go to Dashboard</button>
           </div>`;
-      }
-      return;
+            }
+            return;
+        }
     }
-  }
-  navigate("/");
+    navigate("/");
 }
 
 function updateNavActive(path) {
-  let section = "dashboard";
-  if (path.startsWith("/setlists")) section = "setlists";
-  else if (path.startsWith("/songs")) section = "songs";
-  document.querySelectorAll("[data-nav]").forEach((el) => {
-    el.classList.toggle("active", el.getAttribute("data-nav") === section);
-  });
+    let section = "dashboard";
+    if (path.startsWith("/setlists")) section = "setlists";
+    else if (path.startsWith("/songs")) section = "songs";
+    document.querySelectorAll("[data-nav]").forEach((el) => {
+        el.classList.toggle("active", el.getAttribute("data-nav") === section);
+    });
 }
 
 window.addEventListener("hashchange", router);
@@ -177,10 +262,10 @@ window.addEventListener("DOMContentLoaded", router);
 // ---------------------------------------------------------------------
 
 async function viewDashboard(content) {
-  const setlists = await api.listSetlists();
-  const recent = setlists.slice(0, 5);
+    const setlists = await api.listSetlists();
+    const recent = setlists.slice(0, 5);
 
-  content.innerHTML = `
+    content.innerHTML = `
     <div class="page-title">
       <div>
         <h1>Dashboard</h1>
@@ -197,24 +282,24 @@ async function viewDashboard(content) {
     <h2>Recent Setlists</h2>
     <div id="recent-list">
       ${recent.length
-      ? recent.map(renderSetlistCard).join("")
-      : `<div class="empty-state">
+            ? recent.map(renderSetlistCard).join("")
+            : `<div class="empty-state">
                <div class="icon">🎵</div>
                <p>No setlists yet.</p>
                <button class="btn btn-primary" id="btn-create-setlist-empty">+ Create Setlist</button>
              </div>`
-    }
+        }
     </div>
   `;
 
-  const goCreate = () => navigate("/setlists/new");
-  content.querySelector("#btn-create-setlist")?.addEventListener("click", goCreate);
-  content.querySelector("#btn-create-setlist-empty")?.addEventListener("click", goCreate);
-  bindSetlistCardEvents(content);
+    const goCreate = () => navigate("/setlists/new");
+    content.querySelector("#btn-create-setlist")?.addEventListener("click", goCreate);
+    content.querySelector("#btn-create-setlist-empty")?.addEventListener("click", goCreate);
+    bindSetlistCardEvents(content);
 }
 
 function renderSetlistCard(s) {
-  return `
+    return `
     <div class="list-card" data-setlist-id="${s.id}">
       <div class="info" data-open-setlist="${s.id}" style="cursor:pointer">
         <h3>${escapeHtml(s.name)}</h3>
@@ -232,9 +317,9 @@ function renderSetlistCard(s) {
 }
 
 function bindSetlistCardEvents(content) {
-  content.querySelectorAll("[data-open-setlist]").forEach((el) => {
-    el.addEventListener("click", () => navigate(`/setlists/${el.getAttribute("data-open-setlist")}`));
-  });
+    content.querySelectorAll("[data-open-setlist]").forEach((el) => {
+        el.addEventListener("click", () => navigate(`/setlists/${el.getAttribute("data-open-setlist")}`));
+    });
 }
 
 // ---------------------------------------------------------------------
@@ -242,7 +327,7 @@ function bindSetlistCardEvents(content) {
 // ---------------------------------------------------------------------
 
 async function viewSetlistsList(content) {
-  content.innerHTML = `
+    content.innerHTML = `
     <div class="page-title">
       <h1>Setlists</h1>
       <button class="btn btn-primary" id="btn-new-setlist">+ Create Setlist</button>
@@ -253,25 +338,25 @@ async function viewSetlistsList(content) {
     <div id="setlist-results"><div class="loading"><div class="spinner"></div></div></div>
   `;
 
-  content.querySelector("#btn-new-setlist").addEventListener("click", () => navigate("/setlists/new"));
+    content.querySelector("#btn-new-setlist").addEventListener("click", () => navigate("/setlists/new"));
 
-  const resultsEl = content.querySelector("#setlist-results");
+    const resultsEl = content.querySelector("#setlist-results");
 
-  async function load(search) {
-    const setlists = await api.listSetlists(search);
-    if (!setlists.length) {
-      resultsEl.innerHTML = `
+    async function load(search) {
+        const setlists = await api.listSetlists(search);
+        if (!setlists.length) {
+            resultsEl.innerHTML = `
         <div class="empty-state">
           <div class="icon">🎵</div>
           <p>${search ? "No setlists match your search." : "No setlists yet."}</p>
           ${search ? "" : `<button class="btn btn-primary" id="btn-empty-create">+ Create Setlist</button>`}
         </div>`;
-      resultsEl.querySelector("#btn-empty-create")?.addEventListener("click", () => navigate("/setlists/new"));
-      return;
-    }
-    resultsEl.innerHTML = setlists
-      .map(
-        (s) => `
+            resultsEl.querySelector("#btn-empty-create")?.addEventListener("click", () => navigate("/setlists/new"));
+            return;
+        }
+        resultsEl.innerHTML = setlists
+            .map(
+                (s) => `
       <div class="list-card">
         <div class="info" data-open="${s.id}" style="cursor:pointer">
           <h3>${escapeHtml(s.name)}</h3>
@@ -289,35 +374,35 @@ async function viewSetlistsList(content) {
         </div>
       </div>
     `
-      )
-      .join("");
+            )
+            .join("");
 
-    resultsEl.querySelectorAll("[data-open]").forEach((el) =>
-      el.addEventListener("click", () => navigate(`/setlists/${el.getAttribute("data-open")}`))
+        resultsEl.querySelectorAll("[data-open]").forEach((el) =>
+            el.addEventListener("click", () => navigate(`/setlists/${el.getAttribute("data-open")}`))
+        );
+        resultsEl.querySelectorAll("[data-delete]").forEach((el) =>
+            el.addEventListener("click", async (e) => {
+                e.stopPropagation();
+                const id = el.getAttribute("data-delete");
+                const ok = await confirmDialog("Delete this setlist? This cannot be undone.");
+                if (!ok) return;
+                try {
+                    await api.deleteSetlist(id);
+                    toast("Setlist deleted.", "success");
+                    load(content.querySelector("#setlist-search").value.trim());
+                } catch (err) {
+                    toast(errorMessage(err), "error");
+                }
+            })
+        );
+    }
+
+    content.querySelector("#setlist-search").addEventListener(
+        "input",
+        debounce((e) => load(e.target.value.trim()), 300)
     );
-    resultsEl.querySelectorAll("[data-delete]").forEach((el) =>
-      el.addEventListener("click", async (e) => {
-        e.stopPropagation();
-        const id = el.getAttribute("data-delete");
-        const ok = await confirmDialog("Delete this setlist? This cannot be undone.");
-        if (!ok) return;
-        try {
-          await api.deleteSetlist(id);
-          toast("Setlist deleted.", "success");
-          load(content.querySelector("#setlist-search").value.trim());
-        } catch (err) {
-          toast(errorMessage(err), "error");
-        }
-      })
-    );
-  }
 
-  content.querySelector("#setlist-search").addEventListener(
-    "input",
-    debounce((e) => load(e.target.value.trim()), 300)
-  );
-
-  await load();
+    await load();
 }
 
 // ---------------------------------------------------------------------
@@ -325,7 +410,7 @@ async function viewSetlistsList(content) {
 // ---------------------------------------------------------------------
 
 async function viewSetlistCreate(content) {
-  content.innerHTML = `
+    content.innerHTML = `
     <div class="page-title"><h1>Create Setlist</h1></div>
     <div class="card" style="max-width:520px;">
       <form id="setlist-form">
@@ -349,27 +434,27 @@ async function viewSetlistCreate(content) {
     </div>
   `;
 
-  content.querySelector("#btn-cancel").addEventListener("click", () => navigate("/setlists"));
-  content.querySelector("#setlist-form").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const name = content.querySelector("#f-name").value.trim();
-    const date = content.querySelector("#f-date").value;
-    const description = content.querySelector("#f-desc").value.trim();
-    if (!name || !date) {
-      toast("Please fill in the setlist name and date.", "error");
-      return;
-    }
-    const submitBtn = content.querySelector("button[type=submit]");
-    submitBtn.disabled = true;
-    try {
-      const setlist = await api.createSetlist({ name, date, description: description || null });
-      toast("Setlist created.", "success");
-      navigate(`/setlists/${setlist.id}`);
-    } catch (err) {
-      toast(errorMessage(err), "error");
-      submitBtn.disabled = false;
-    }
-  });
+    content.querySelector("#btn-cancel").addEventListener("click", () => navigate("/setlists"));
+    content.querySelector("#setlist-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const name = content.querySelector("#f-name").value.trim();
+        const date = content.querySelector("#f-date").value;
+        const description = content.querySelector("#f-desc").value.trim();
+        if (!name || !date) {
+            toast("Please fill in the setlist name and date.", "error");
+            return;
+        }
+        const submitBtn = content.querySelector("button[type=submit]");
+        submitBtn.disabled = true;
+        try {
+            const setlist = await api.createSetlist({ name, date, description: description || null });
+            toast("Setlist created.", "success");
+            navigate(`/setlists/${setlist.id}`);
+        } catch (err) {
+            toast(errorMessage(err), "error");
+            submitBtn.disabled = false;
+        }
+    });
 }
 
 // ---------------------------------------------------------------------
@@ -377,14 +462,14 @@ async function viewSetlistCreate(content) {
 // ---------------------------------------------------------------------
 
 async function viewSetlistDetail(content, setlistId) {
-  const setlist = await api.getSetlist(setlistId);
-  renderSetlistDetail(content, setlist);
+    const setlist = await api.getSetlist(setlistId);
+    renderSetlistDetail(content, setlist);
 }
 
 function renderSetlistDetail(content, setlist) {
-  const songs = [...setlist.songs].sort((a, b) => a.song_order - b.song_order);
+    const songs = [...setlist.songs].sort((a, b) => a.song_order - b.song_order);
 
-  content.innerHTML = `
+    content.innerHTML = `
     <div class="page-title">
       <div>
         <p class="eyebrow" style="cursor:pointer" id="back-to-setlists">← Setlists</p>
@@ -400,43 +485,43 @@ function renderSetlistDetail(content, setlist) {
     <h2>Songs</h2>
     <div id="song-list">
       ${songs.length
-      ? songs.map((s, i) => renderSetlistSongRow(s, i, songs.length)).join("")
-      : `<div class="empty-state">
+            ? songs.map((s, i) => renderSetlistSongRow(s, i, songs.length)).join("")
+            : `<div class="empty-state">
                <div class="icon">🎼</div>
                <p>No songs added yet.</p>
              </div>`
-    }
+        }
     </div>
     <button class="btn btn-primary btn-block" id="btn-add-song" style="margin-top:10px;">+ Add Song</button>
   `;
 
-  content.querySelector("#back-to-setlists").addEventListener("click", () => navigate("/setlists"));
+    content.querySelector("#back-to-setlists").addEventListener("click", () => navigate("/setlists"));
 
-  content.querySelector("#btn-edit-setlist").addEventListener("click", () => openEditSetlistModal(setlist));
+    content.querySelector("#btn-edit-setlist").addEventListener("click", () => openEditSetlistModal(setlist));
 
-  content.querySelector("#btn-delete-setlist").addEventListener("click", async () => {
-    const ok = await confirmDialog(`Delete "${setlist.name}"? This cannot be undone.`);
-    if (!ok) return;
-    try {
-      await api.deleteSetlist(setlist.id);
-      toast("Setlist deleted.", "success");
-      navigate("/setlists");
-    } catch (err) {
-      toast(errorMessage(err), "error");
-    }
-  });
+    content.querySelector("#btn-delete-setlist").addEventListener("click", async () => {
+        const ok = await confirmDialog(`Delete "${setlist.name}"? This cannot be undone.`);
+        if (!ok) return;
+        try {
+            await api.deleteSetlist(setlist.id);
+            toast("Setlist deleted.", "success");
+            navigate("/setlists");
+        } catch (err) {
+            toast(errorMessage(err), "error");
+        }
+    });
 
-  content.querySelector("#btn-add-song").addEventListener("click", () => openAddSongModal(setlist, content));
+    content.querySelector("#btn-add-song").addEventListener("click", () => openAddSongModal(setlist, content));
 
-  bindSetlistSongRowEvents(content, setlist);
+    bindSetlistSongRowEvents(content, setlist);
 }
 
 function renderSetlistSongRow(s, index, total) {
-  const keyLabel = s.key_override && s.original_key && s.key_override !== s.original_key
-    ? `${escapeHtml(s.key)} <span class="faint">(orig ${escapeHtml(s.original_key)})</span>`
-    : escapeHtml(s.key || "—");
+    const keyLabel = s.key_override && s.original_key && s.key_override !== s.original_key
+        ? `${escapeHtml(s.key)} <span class="faint">(orig ${escapeHtml(s.original_key)})</span>`
+        : escapeHtml(s.key || "—");
 
-  return `
+    return `
     <div class="song-row" data-row-id="${s.id}">
       <div class="num">${String(index + 1).padStart(2, "0")}</div>
       <div class="info" data-open-song="${s.id}">
@@ -459,63 +544,63 @@ function renderSetlistSongRow(s, index, total) {
 }
 
 function bindSetlistSongRowEvents(content, setlist) {
-  content.querySelectorAll("[data-open-song]").forEach((el) =>
-    el.addEventListener("click", () => navigate(`/setlist-song/${el.getAttribute("data-open-song")}`))
-  );
+    content.querySelectorAll("[data-open-song]").forEach((el) =>
+        el.addEventListener("click", () => navigate(`/setlist-song/${el.getAttribute("data-open-song")}`))
+    );
 
-  content.querySelectorAll("[data-edit-row]").forEach((el) =>
-    el.addEventListener("click", () => {
-      const row = setlist.songs.find((s) => String(s.id) === el.getAttribute("data-edit-row"));
-      openEditSetlistSongModal(row, setlist, content);
-    })
-  );
+    content.querySelectorAll("[data-edit-row]").forEach((el) =>
+        el.addEventListener("click", () => {
+            const row = setlist.songs.find((s) => String(s.id) === el.getAttribute("data-edit-row"));
+            openEditSetlistSongModal(row, setlist, content);
+        })
+    );
 
-  content.querySelectorAll("[data-remove-row]").forEach((el) =>
-    el.addEventListener("click", async () => {
-      const id = el.getAttribute("data-remove-row");
-      const row = setlist.songs.find((s) => String(s.id) === id);
-      const ok = await confirmDialog(`Remove "${row.title}" from this setlist?`, { confirmLabel: "Remove" });
-      if (!ok) return;
-      try {
-        await api.removeSongFromSetlist(setlist.id, id);
-        const fresh = await api.getSetlist(setlist.id);
-        renderSetlistDetail(content, fresh);
-        toast("Song removed.", "success");
-      } catch (err) {
-        toast(errorMessage(err), "error");
-      }
-    })
-  );
+    content.querySelectorAll("[data-remove-row]").forEach((el) =>
+        el.addEventListener("click", async () => {
+            const id = el.getAttribute("data-remove-row");
+            const row = setlist.songs.find((s) => String(s.id) === id);
+            const ok = await confirmDialog(`Remove "${row.title}" from this setlist?`, { confirmLabel: "Remove" });
+            if (!ok) return;
+            try {
+                await api.removeSongFromSetlist(setlist.id, id);
+                const fresh = await api.getSetlist(setlist.id);
+                renderSetlistDetail(content, fresh);
+                toast("Song removed.", "success");
+            } catch (err) {
+                toast(errorMessage(err), "error");
+            }
+        })
+    );
 
-  content.querySelectorAll("[data-move-up]").forEach((el) =>
-    el.addEventListener("click", () => moveSetlistSong(setlist, content, el.getAttribute("data-move-up"), -1))
-  );
-  content.querySelectorAll("[data-move-down]").forEach((el) =>
-    el.addEventListener("click", () => moveSetlistSong(setlist, content, el.getAttribute("data-move-down"), 1))
-  );
+    content.querySelectorAll("[data-move-up]").forEach((el) =>
+        el.addEventListener("click", () => moveSetlistSong(setlist, content, el.getAttribute("data-move-up"), -1))
+    );
+    content.querySelectorAll("[data-move-down]").forEach((el) =>
+        el.addEventListener("click", () => moveSetlistSong(setlist, content, el.getAttribute("data-move-down"), 1))
+    );
 }
 
 async function moveSetlistSong(setlist, content, songRowId, direction) {
-  const songs = [...setlist.songs].sort((a, b) => a.song_order - b.song_order);
-  const idx = songs.findIndex((s) => String(s.id) === String(songRowId));
-  const swapWith = idx + direction;
-  if (swapWith < 0 || swapWith >= songs.length) return;
+    const songs = [...setlist.songs].sort((a, b) => a.song_order - b.song_order);
+    const idx = songs.findIndex((s) => String(s.id) === String(songRowId));
+    const swapWith = idx + direction;
+    if (swapWith < 0 || swapWith >= songs.length) return;
 
-  [songs[idx], songs[swapWith]] = [songs[swapWith], songs[idx]];
-  const order = songs.map((s, i) => ({ id: s.id, song_order: i }));
+    [songs[idx], songs[swapWith]] = [songs[swapWith], songs[idx]];
+    const order = songs.map((s, i) => ({ id: s.id, song_order: i }));
 
-  try {
-    await api.reorderSetlistSongs(setlist.id, order);
-    const fresh = await api.getSetlist(setlist.id);
-    renderSetlistDetail(content, fresh);
-  } catch (err) {
-    toast(errorMessage(err), "error");
-  }
+    try {
+        await api.reorderSetlistSongs(setlist.id, order);
+        const fresh = await api.getSetlist(setlist.id);
+        renderSetlistDetail(content, fresh);
+    } catch (err) {
+        toast(errorMessage(err), "error");
+    }
 }
 
 function openEditSetlistModal(setlist) {
-  openModal(
-    `
+    openModal(
+        `
     <form id="edit-setlist-form">
       <div class="field">
         <label for="e-name">Setlist Name</label>
@@ -535,33 +620,33 @@ function openEditSetlistModal(setlist) {
       </div>
     </form>
   `,
-    {
-      title: "Edit Setlist",
-      onMount: (overlay) => {
-        overlay.querySelector("#edit-setlist-form").addEventListener("submit", async (e) => {
-          e.preventDefault();
-          try {
-            await api.updateSetlist(setlist.id, {
-              name: overlay.querySelector("#e-name").value.trim(),
-              date: overlay.querySelector("#e-date").value,
-              description: overlay.querySelector("#e-desc").value.trim() || null,
-            });
-            closeModal();
-            toast("Setlist updated.", "success");
-            const fresh = await api.getSetlist(setlist.id);
-            renderSetlistDetail(document.getElementById("content"), fresh);
-          } catch (err) {
-            toast(errorMessage(err), "error");
-          }
-        });
-      },
-    }
-  );
+        {
+            title: "Edit Setlist",
+            onMount: (overlay) => {
+                overlay.querySelector("#edit-setlist-form").addEventListener("submit", async (e) => {
+                    e.preventDefault();
+                    try {
+                        await api.updateSetlist(setlist.id, {
+                            name: overlay.querySelector("#e-name").value.trim(),
+                            date: overlay.querySelector("#e-date").value,
+                            description: overlay.querySelector("#e-desc").value.trim() || null,
+                        });
+                        closeModal();
+                        toast("Setlist updated.", "success");
+                        const fresh = await api.getSetlist(setlist.id);
+                        renderSetlistDetail(document.getElementById("content"), fresh);
+                    } catch (err) {
+                        toast(errorMessage(err), "error");
+                    }
+                });
+            },
+        }
+    );
 }
 
 function openEditSetlistSongModal(row, setlist, content) {
-  openModal(
-    `
+    openModal(
+        `
     <form id="edit-row-form">
       <p class="muted" style="margin-top:0">${escapeHtml(row.title)}</p>
       <div class="field-row">
@@ -584,59 +669,59 @@ function openEditSetlistSongModal(row, setlist, content) {
       </div>
     </form>
   `,
-    {
-      title: "Setlist-only Overrides",
-      onMount: (overlay) => {
-        overlay.querySelector("#edit-row-form").addEventListener("submit", async (e) => {
-          e.preventDefault();
-          try {
-            const keyVal = overlay.querySelector("#r-key").value.trim();
-            const bpmVal = overlay.querySelector("#r-bpm").value;
-            await api.updateSetlistSong(row.id, {
-              key_override: keyVal || null,
-              bpm_override: bpmVal ? Number(bpmVal) : null,
-              notes: overlay.querySelector("#r-notes").value.trim() || null,
-            });
-            closeModal();
-            toast("Saved.", "success");
-            const fresh = await api.getSetlist(setlist.id);
-            renderSetlistDetail(content, fresh);
-          } catch (err) {
-            toast(errorMessage(err), "error");
-          }
-        });
-      },
-    }
-  );
+        {
+            title: "Setlist-only Overrides",
+            onMount: (overlay) => {
+                overlay.querySelector("#edit-row-form").addEventListener("submit", async (e) => {
+                    e.preventDefault();
+                    try {
+                        const keyVal = overlay.querySelector("#r-key").value.trim();
+                        const bpmVal = overlay.querySelector("#r-bpm").value;
+                        await api.updateSetlistSong(row.id, {
+                            key_override: keyVal || null,
+                            bpm_override: bpmVal ? Number(bpmVal) : null,
+                            notes: overlay.querySelector("#r-notes").value.trim() || null,
+                        });
+                        closeModal();
+                        toast("Saved.", "success");
+                        const fresh = await api.getSetlist(setlist.id);
+                        renderSetlistDetail(content, fresh);
+                    } catch (err) {
+                        toast(errorMessage(err), "error");
+                    }
+                });
+            },
+        }
+    );
 }
 
 function openAddSongModal(setlist, content) {
-  openModal(
-    `
+    openModal(
+        `
     <input type="text" id="picker-search" placeholder="Search songs…" style="width:100%; background:var(--bg-card); border:1px solid var(--border); color:var(--text); border-radius:9px; padding:12px 14px; font-size:0.95rem; margin-bottom:14px;" />
     <div id="picker-results"><div class="loading"><div class="spinner"></div></div></div>
   `,
-    {
-      title: "Add Song",
-      onMount: async (overlay) => {
-        const resultsEl = overlay.querySelector("#picker-results");
+        {
+            title: "Add Song",
+            onMount: async (overlay) => {
+                const resultsEl = overlay.querySelector("#picker-results");
 
-        async function load(search) {
-          const songs = await api.listSongs(search);
-          if (!songs.length) {
-            resultsEl.innerHTML = `<div class="empty-state">
+                async function load(search) {
+                    const songs = await api.listSongs(search);
+                    if (!songs.length) {
+                        resultsEl.innerHTML = `<div class="empty-state">
               <p>${search ? "No songs match your search." : "Your song library is empty."}</p>
               ${search ? "" : `<button class="btn btn-primary" id="picker-empty-create">+ Add Song</button>`}
             </div>`;
-            resultsEl.querySelector("#picker-empty-create")?.addEventListener("click", () => {
-              closeModal();
-              navigate("/songs/new");
-            });
-            return;
-          }
-          resultsEl.innerHTML = songs
-            .map(
-              (song) => `
+                        resultsEl.querySelector("#picker-empty-create")?.addEventListener("click", () => {
+                            closeModal();
+                            navigate("/songs/new");
+                        });
+                        return;
+                    }
+                    resultsEl.innerHTML = songs
+                        .map(
+                            (song) => `
             <div class="picker-item">
               <div class="info">
                 <h4>${escapeHtml(song.title)}</h4>
@@ -645,56 +730,56 @@ function openAddSongModal(setlist, content) {
               <button class="btn btn-sm btn-primary" data-add="${song.id}">Add</button>
             </div>
           `
-            )
-            .join("");
+                        )
+                        .join("");
 
-          resultsEl.querySelectorAll("[data-add]").forEach((btn) =>
-            btn.addEventListener("click", async () => {
-              btn.disabled = true;
-              btn.textContent = "Adding…";
-              const songId = Number(btn.getAttribute("data-add"));
-              try {
-                await api.addSongToSetlist(setlist.id, songId);
-                toast("Song added.", "success");
-                closeModal();
-                const fresh = await api.getSetlist(setlist.id);
-                renderSetlistDetail(content, fresh);
-              } catch (err) {
-                if (err.status === 409) {
-                  const again = await confirmDialog(errorMessage(err), { confirmLabel: "Add Anyway", danger: false });
-                  if (again) {
-                    try {
-                      await api.addSongToSetlist(setlist.id, songId, null, true);
-                      toast("Song added.", "success");
-                      closeModal();
-                      const fresh = await api.getSetlist(setlist.id);
-                      renderSetlistDetail(content, fresh);
-                      return;
-                    } catch (err2) {
-                      toast(errorMessage(err2), "error");
-                    }
-                  }
-                  btn.disabled = false;
-                  btn.textContent = "Add";
-                } else {
-                  toast(errorMessage(err), "error");
-                  btn.disabled = false;
-                  btn.textContent = "Add";
+                    resultsEl.querySelectorAll("[data-add]").forEach((btn) =>
+                        btn.addEventListener("click", async () => {
+                            btn.disabled = true;
+                            btn.textContent = "Adding…";
+                            const songId = Number(btn.getAttribute("data-add"));
+                            try {
+                                await api.addSongToSetlist(setlist.id, songId);
+                                toast("Song added.", "success");
+                                closeModal();
+                                const fresh = await api.getSetlist(setlist.id);
+                                renderSetlistDetail(content, fresh);
+                            } catch (err) {
+                                if (err.status === 409) {
+                                    const again = await confirmDialog(errorMessage(err), { confirmLabel: "Add Anyway", danger: false });
+                                    if (again) {
+                                        try {
+                                            await api.addSongToSetlist(setlist.id, songId, null, true);
+                                            toast("Song added.", "success");
+                                            closeModal();
+                                            const fresh = await api.getSetlist(setlist.id);
+                                            renderSetlistDetail(content, fresh);
+                                            return;
+                                        } catch (err2) {
+                                            toast(errorMessage(err2), "error");
+                                        }
+                                    }
+                                    btn.disabled = false;
+                                    btn.textContent = "Add";
+                                } else {
+                                    toast(errorMessage(err), "error");
+                                    btn.disabled = false;
+                                    btn.textContent = "Add";
+                                }
+                            }
+                        })
+                    );
                 }
-              }
-            })
-          );
+
+                overlay.querySelector("#picker-search").addEventListener(
+                    "input",
+                    debounce((e) => load(e.target.value.trim()), 300)
+                );
+
+                await load();
+            },
         }
-
-        overlay.querySelector("#picker-search").addEventListener(
-          "input",
-          debounce((e) => load(e.target.value.trim()), 300)
-        );
-
-        await load();
-      },
-    }
-  );
+    );
 }
 
 // ---------------------------------------------------------------------
@@ -702,7 +787,7 @@ function openAddSongModal(setlist, content) {
 // ---------------------------------------------------------------------
 
 async function viewSongsList(content) {
-  content.innerHTML = `
+    content.innerHTML = `
     <div class="page-title">
       <h1>Song Library</h1>
       <button class="btn btn-primary" id="btn-new-song">+ Add Song</button>
@@ -713,24 +798,24 @@ async function viewSongsList(content) {
     <div id="song-results"><div class="loading"><div class="spinner"></div></div></div>
   `;
 
-  content.querySelector("#btn-new-song").addEventListener("click", () => navigate("/songs/new"));
-  const resultsEl = content.querySelector("#song-results");
+    content.querySelector("#btn-new-song").addEventListener("click", () => navigate("/songs/new"));
+    const resultsEl = content.querySelector("#song-results");
 
-  async function load(search) {
-    const songs = await api.listSongs(search);
-    if (!songs.length) {
-      resultsEl.innerHTML = `
+    async function load(search) {
+        const songs = await api.listSongs(search);
+        if (!songs.length) {
+            resultsEl.innerHTML = `
         <div class="empty-state">
           <div class="icon">🎸</div>
           <p>${search ? "No songs match your search." : "Your song library is empty."}</p>
           ${search ? "" : `<button class="btn btn-primary" id="btn-empty-add">+ Add Your First Worship Song</button>`}
         </div>`;
-      resultsEl.querySelector("#btn-empty-add")?.addEventListener("click", () => navigate("/songs/new"));
-      return;
-    }
-    resultsEl.innerHTML = songs
-      .map(
-        (song) => `
+            resultsEl.querySelector("#btn-empty-add")?.addEventListener("click", () => navigate("/songs/new"));
+            return;
+        }
+        resultsEl.innerHTML = songs
+            .map(
+                (song) => `
       <div class="list-card">
         <div class="info" data-open="${song.id}" style="cursor:pointer">
           <h3>${escapeHtml(song.title)}</h3>
@@ -749,53 +834,53 @@ async function viewSongsList(content) {
         </div>
       </div>
     `
-      )
-      .join("");
+            )
+            .join("");
 
-    resultsEl.querySelectorAll("[data-open]").forEach((el) =>
-      el.addEventListener("click", () => navigate(`/songs/${el.getAttribute("data-open")}/edit`))
+        resultsEl.querySelectorAll("[data-open]").forEach((el) =>
+            el.addEventListener("click", () => navigate(`/songs/${el.getAttribute("data-open")}/edit`))
+        );
+
+        resultsEl.querySelectorAll("[data-delete]").forEach((el) =>
+            el.addEventListener("click", async (e) => {
+                e.stopPropagation();
+                const id = el.getAttribute("data-delete");
+                const title = el.getAttribute("data-title");
+                const ok = await confirmDialog(`Delete "${title}"? This cannot be undone.`);
+                if (!ok) return;
+                try {
+                    await api.deleteSong(id);
+                    toast("Song deleted.", "success");
+                    load(content.querySelector("#song-search").value.trim());
+                } catch (err) {
+                    if (err.status === 409) {
+                        const force = await confirmDialog(
+                            `${errorMessage(err)}\n\nDelete anyway? Setlists using this song will keep showing its title/artist/key.`,
+                            { confirmLabel: "Delete Anyway" }
+                        );
+                        if (force) {
+                            try {
+                                await api.deleteSong(id, true);
+                                toast("Song deleted.", "success");
+                                load(content.querySelector("#song-search").value.trim());
+                            } catch (err2) {
+                                toast(errorMessage(err2), "error");
+                            }
+                        }
+                    } else {
+                        toast(errorMessage(err), "error");
+                    }
+                }
+            })
+        );
+    }
+
+    content.querySelector("#song-search").addEventListener(
+        "input",
+        debounce((e) => load(e.target.value.trim()), 300)
     );
 
-    resultsEl.querySelectorAll("[data-delete]").forEach((el) =>
-      el.addEventListener("click", async (e) => {
-        e.stopPropagation();
-        const id = el.getAttribute("data-delete");
-        const title = el.getAttribute("data-title");
-        const ok = await confirmDialog(`Delete "${title}"? This cannot be undone.`);
-        if (!ok) return;
-        try {
-          await api.deleteSong(id);
-          toast("Song deleted.", "success");
-          load(content.querySelector("#song-search").value.trim());
-        } catch (err) {
-          if (err.status === 409) {
-            const force = await confirmDialog(
-              `${errorMessage(err)}\n\nDelete anyway? Setlists using this song will keep showing its title/artist/key.`,
-              { confirmLabel: "Delete Anyway" }
-            );
-            if (force) {
-              try {
-                await api.deleteSong(id, true);
-                toast("Song deleted.", "success");
-                load(content.querySelector("#song-search").value.trim());
-              } catch (err2) {
-                toast(errorMessage(err2), "error");
-              }
-            }
-          } else {
-            toast(errorMessage(err), "error");
-          }
-        }
-      })
-    );
-  }
-
-  content.querySelector("#song-search").addEventListener(
-    "input",
-    debounce((e) => load(e.target.value.trim()), 300)
-  );
-
-  await load();
+    await load();
 }
 
 // ---------------------------------------------------------------------
@@ -803,20 +888,20 @@ async function viewSongsList(content) {
 // ---------------------------------------------------------------------
 
 const SECTION_PRESETS = [
-  "Intro", "Verse 1", "Verse 2", "Verse 3", "Pre-Chorus", "Chorus",
-  "Bridge", "Instrumental", "Outro", "Custom",
+    "Intro", "Verse 1", "Verse 2", "Verse 3", "Pre-Chorus", "Chorus",
+    "Bridge", "Instrumental", "Outro", "Custom",
 ];
 
 async function viewSongForm(content, songId) {
-  const isEdit = !!songId;
-  let song = null;
-  if (isEdit) song = await api.getSong(songId);
+    const isEdit = !!songId;
+    let song = null;
+    if (isEdit) song = await api.getSong(songId);
 
-  let sections = isEdit
-    ? song.sections.map((s) => ({ ...s, _localId: "s" + s.id }))
-    : [{ section_name: "Verse 1", section_order: 0, content: "", _localId: "new1" }];
+    let sections = isEdit
+        ? song.sections.map((s) => ({ ...s, _localId: "s" + s.id }))
+        : [{ section_name: "Verse 1", section_order: 0, content: "", _localId: "new1" }];
 
-  content.innerHTML = `
+    content.innerHTML = `
     <div class="page-title">
       <div>
         <p class="eyebrow" style="cursor:pointer" id="back-link">← Songs</p>
@@ -855,6 +940,7 @@ async function viewSongForm(content, songId) {
 
       <div class="page-title" style="margin-bottom:12px;">
         <h2 style="margin:0;">Lyrics &amp; Chords</h2>
+        <button type="button" class="btn btn-sm" id="btn-paste-song">Paste Whole Song</button>
         <button type="button" class="btn btn-sm" id="btn-add-section">+ Add Section</button>
       </div>
       <div class="chordpro-help">
@@ -870,21 +956,21 @@ async function viewSongForm(content, songId) {
     </form>
   `;
 
-  content.querySelector("#back-link").addEventListener("click", () => navigate("/songs"));
-  content.querySelector("#btn-cancel").addEventListener("click", () => navigate("/songs"));
+    content.querySelector("#back-link").addEventListener("click", () => navigate("/songs"));
+    content.querySelector("#btn-cancel").addEventListener("click", () => navigate("/songs"));
 
-  const sectionsEditorEl = content.querySelector("#sections-editor");
+    const sectionsEditorEl = content.querySelector("#sections-editor");
 
-  function renderSections() {
-    sectionsEditorEl.innerHTML = sections
-      .map(
-        (sec, i) => `
+    function renderSections() {
+        sectionsEditorEl.innerHTML = sections
+            .map(
+                (sec, i) => `
       <div class="section-editor" data-local-id="${sec._localId}">
         <div class="section-editor-head">
           <select data-field="name" style="width:160px; background:var(--bg-card); border:1px solid var(--border); color:var(--text); border-radius:9px; padding:9px 10px;">
             ${SECTION_PRESETS.map(
-          (p) => `<option value="${p}" ${sec.section_name === p ? "selected" : ""}>${p}</option>`
-        ).join("")}
+                    (p) => `<option value="${p}" ${sec.section_name === p ? "selected" : ""}>${p}</option>`
+                ).join("")}
           </select>
           <input type="text" data-field="custom-name" placeholder="Custom section name…" value="${SECTION_PRESETS.includes(sec.section_name) ? "" : escapeHtml(sec.section_name)}" style="${SECTION_PRESETS.includes(sec.section_name) ? "display:none;" : ""} flex:1;" />
           <button type="button" class="btn btn-icon btn-sm" data-move="up" ${i === 0 ? "disabled" : ""} title="Move up">▲</button>
@@ -894,158 +980,197 @@ async function viewSongForm(content, songId) {
         <textarea data-field="content" rows="4" placeholder="[E]Take me back to where&#10;[B]I first believed">${escapeHtml(sec.content)}</textarea>
       </div>
     `
-      )
-      .join("");
+            )
+            .join("");
 
-    sectionsEditorEl.querySelectorAll(".section-editor").forEach((el) => {
-      const localId = el.getAttribute("data-local-id");
-      const sec = sections.find((s) => s._localId === localId);
+        sectionsEditorEl.querySelectorAll(".section-editor").forEach((el) => {
+            const localId = el.getAttribute("data-local-id");
+            const sec = sections.find((s) => s._localId === localId);
 
-      const nameSelect = el.querySelector('[data-field="name"]');
-      const customInput = el.querySelector('[data-field="custom-name"]');
-      nameSelect.addEventListener("change", () => {
-        if (nameSelect.value === "Custom") {
-          customInput.style.display = "";
-          customInput.focus();
-          sec.section_name = customInput.value || "Custom";
-        } else {
-          customInput.style.display = "none";
-          sec.section_name = nameSelect.value;
-        }
-      });
-      customInput.addEventListener("input", () => {
-        sec.section_name = customInput.value || "Custom";
-      });
-      el.querySelector('[data-field="content"]').addEventListener("input", (e) => {
-        sec.content = e.target.value;
-      });
-      el.querySelector("[data-remove]").addEventListener("click", () => {
-        sections = sections.filter((s) => s._localId !== localId);
+            const nameSelect = el.querySelector('[data-field="name"]');
+            const customInput = el.querySelector('[data-field="custom-name"]');
+            nameSelect.addEventListener("change", () => {
+                if (nameSelect.value === "Custom") {
+                    customInput.style.display = "";
+                    customInput.focus();
+                    sec.section_name = customInput.value || "Custom";
+                } else {
+                    customInput.style.display = "none";
+                    sec.section_name = nameSelect.value;
+                }
+            });
+            customInput.addEventListener("input", () => {
+                sec.section_name = customInput.value || "Custom";
+            });
+            el.querySelector('[data-field="content"]').addEventListener("input", (e) => {
+                sec.content = e.target.value;
+            });
+            el.querySelector("[data-remove]").addEventListener("click", () => {
+                sections = sections.filter((s) => s._localId !== localId);
+                renderSections();
+            });
+            const moveButtons = el.querySelectorAll("[data-move]");
+            moveButtons.forEach((btn) =>
+                btn.addEventListener("click", () => {
+                    const idx = sections.findIndex((s) => s._localId === localId);
+                    const dir = btn.getAttribute("data-move") === "up" ? -1 : 1;
+                    const swapIdx = idx + dir;
+                    if (swapIdx < 0 || swapIdx >= sections.length) return;
+                    [sections[idx], sections[swapIdx]] = [sections[swapIdx], sections[idx]];
+                    renderSections();
+                })
+            );
+        });
+    }
+
+    content.querySelector("#btn-add-section").addEventListener("click", () => {
+        sections.push({
+            section_name: "Verse 1",
+            section_order: sections.length,
+            content: "",
+            _localId: "new" + Date.now(),
+        });
         renderSections();
-      });
-      const moveButtons = el.querySelectorAll("[data-move]");
-      moveButtons.forEach((btn) =>
-        btn.addEventListener("click", () => {
-          const idx = sections.findIndex((s) => s._localId === localId);
-          const dir = btn.getAttribute("data-move") === "up" ? -1 : 1;
-          const swapIdx = idx + dir;
-          if (swapIdx < 0 || swapIdx >= sections.length) return;
-          [sections[idx], sections[swapIdx]] = [sections[swapIdx], sections[idx]];
-          renderSections();
-        })
-      );
     });
-  }
 
-  content.querySelector("#btn-add-section").addEventListener("click", () => {
-    sections.push({
-      section_name: "Verse 1",
-      section_order: sections.length,
-      content: "",
-      _localId: "new" + Date.now(),
-    });
-    renderSections();
-  });
-
-  renderSections();
-
-  if (isEdit) {
-    content.querySelector("#btn-delete-song").addEventListener("click", async () => {
-      const ok = await confirmDialog(`Delete "${song.title}"? This cannot be undone.`);
-      if (!ok) return;
-      try {
-        await api.deleteSong(song.id);
-        toast("Song deleted.", "success");
-        navigate("/songs");
-      } catch (err) {
-        if (err.status === 409) {
-          const force = await confirmDialog(
-            `${errorMessage(err)}\n\nDelete anyway? Setlists using this song will keep showing its title/artist/key.`,
-            { confirmLabel: "Delete Anyway" }
-          );
-          if (force) {
-            try {
-              await api.deleteSong(song.id, true);
-              toast("Song deleted.", "success");
-              navigate("/songs");
-            } catch (err2) {
-              toast(errorMessage(err2), "error");
+    content.querySelector("#btn-paste-song").addEventListener("click", () => {
+        openModal(
+            `<div class="chordpro-help" style="margin-bottom:14px;">
+         Paste chords + lyrics like you normally write them - chords on their own line directly
+         above the lyric line. Mark sections with a label in brackets on its own line, e.g.
+         <code>[Verse 1]</code>, <code>[Chorus]</code>, <code>[Intro]</code>. This replaces the
+         sections below.
+       </div>
+       <textarea id="paste-song-textarea" rows="16" style="width:100%; font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace; font-size:0.85rem; background:var(--bg-card); border:1px solid var(--border); color:var(--text); border-radius:9px; padding:12px;" placeholder="[Verse 1]
+     G                   Em7
+The splendor of a King, clothed in majesty"></textarea>
+       <div class="btn-row" style="justify-content:flex-end; margin-top:16px;">
+         <button type="button" class="btn" data-close-modal>Cancel</button>
+         <button type="button" class="btn btn-primary" id="btn-parse-song">Parse &amp; Fill Sections</button>
+       </div>`,
+            {
+                title: "Paste Whole Song",
+                onMount: (overlay) => {
+                    overlay.querySelector("#btn-parse-song").addEventListener("click", () => {
+                        const raw = overlay.querySelector("#paste-song-textarea").value;
+                        if (!raw.trim()) {
+                            toast("Paste some lyrics/chords first.", "error");
+                            return;
+                        }
+                        const parsed = parseFullSongText(raw);
+                        if (!parsed.length) {
+                            toast("Couldn't find any content to parse.", "error");
+                            return;
+                        }
+                        sections = parsed;
+                        renderSections();
+                        closeModal();
+                        toast(`Parsed ${parsed.length} section${parsed.length === 1 ? "" : "s"}.`, "success");
+                    });
+                },
             }
-          }
-        } else {
-          toast(errorMessage(err), "error");
-        }
-      }
+        );
     });
-  }
 
-  content.querySelector("#song-form").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const title = content.querySelector("#f-title").value.trim();
-    if (!title) {
-      toast("Title is required.", "error");
-      return;
+    renderSections();
+
+    if (isEdit) {
+        content.querySelector("#btn-delete-song").addEventListener("click", async () => {
+            const ok = await confirmDialog(`Delete "${song.title}"? This cannot be undone.`);
+            if (!ok) return;
+            try {
+                await api.deleteSong(song.id);
+                toast("Song deleted.", "success");
+                navigate("/songs");
+            } catch (err) {
+                if (err.status === 409) {
+                    const force = await confirmDialog(
+                        `${errorMessage(err)}\n\nDelete anyway? Setlists using this song will keep showing its title/artist/key.`,
+                        { confirmLabel: "Delete Anyway" }
+                    );
+                    if (force) {
+                        try {
+                            await api.deleteSong(song.id, true);
+                            toast("Song deleted.", "success");
+                            navigate("/songs");
+                        } catch (err2) {
+                            toast(errorMessage(err2), "error");
+                        }
+                    }
+                } else {
+                    toast(errorMessage(err), "error");
+                }
+            }
+        });
     }
-    const payload = {
-      title,
-      artist: content.querySelector("#f-artist").value.trim() || null,
-      original_key: content.querySelector("#f-key").value.trim() || null,
-      bpm: content.querySelector("#f-bpm").value ? Number(content.querySelector("#f-bpm").value) : null,
-      time_signature: content.querySelector("#f-ts").value.trim() || "4/4",
-    };
 
-    const submitBtn = content.querySelector("button[type=submit]");
-    submitBtn.disabled = true;
+    content.querySelector("#song-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const title = content.querySelector("#f-title").value.trim();
+        if (!title) {
+            toast("Title is required.", "error");
+            return;
+        }
+        const payload = {
+            title,
+            artist: content.querySelector("#f-artist").value.trim() || null,
+            original_key: content.querySelector("#f-key").value.trim() || null,
+            bpm: content.querySelector("#f-bpm").value ? Number(content.querySelector("#f-bpm").value) : null,
+            time_signature: content.querySelector("#f-ts").value.trim() || "4/4",
+        };
 
-    try {
-      let savedSong;
-      if (isEdit) {
-        savedSong = await api.updateSong(song.id, payload);
-        await syncSections(song.id, song.sections, sections);
-      } else {
-        payload.sections = sections.map((s, i) => ({
-          section_name: s.section_name,
-          section_order: i,
-          content: s.content,
-        }));
-        savedSong = await api.createSong(payload);
-      }
-      toast(isEdit ? "Song updated." : "Song created.", "success");
-      navigate("/songs");
-    } catch (err) {
-      toast(errorMessage(err), "error");
-      submitBtn.disabled = false;
-    }
-  });
+        const submitBtn = content.querySelector("button[type=submit]");
+        submitBtn.disabled = true;
+
+        try {
+            let savedSong;
+            if (isEdit) {
+                savedSong = await api.updateSong(song.id, payload);
+                await syncSections(song.id, song.sections, sections);
+            } else {
+                payload.sections = sections.map((s, i) => ({
+                    section_name: s.section_name,
+                    section_order: i,
+                    content: s.content,
+                }));
+                savedSong = await api.createSong(payload);
+            }
+            toast(isEdit ? "Song updated." : "Song created.", "success");
+            navigate("/songs");
+        } catch (err) {
+            toast(errorMessage(err), "error");
+            submitBtn.disabled = false;
+        }
+    });
 }
 
 // Reconciles the in-memory section list against the server for an
 // existing song: updates changed sections, creates new ones, deletes
 // removed ones, then persists the final order.
 async function syncSections(songId, originalSections, currentSections) {
-  const originalIds = new Set(originalSections.map((s) => s.id));
-  const currentIds = new Set(currentSections.filter((s) => s.id).map((s) => s.id));
+    const originalIds = new Set(originalSections.map((s) => s.id));
+    const currentIds = new Set(currentSections.filter((s) => s.id).map((s) => s.id));
 
-  const toDelete = [...originalIds].filter((id) => !currentIds.has(id));
-  await Promise.all(toDelete.map((id) => api.deleteSection(id)));
+    const toDelete = [...originalIds].filter((id) => !currentIds.has(id));
+    await Promise.all(toDelete.map((id) => api.deleteSection(id)));
 
-  const created = [];
-  for (const sec of currentSections) {
-    if (sec.id) {
-      await api.updateSection(sec.id, { section_name: sec.section_name, content: sec.content });
-      created.push({ id: sec.id });
-    } else {
-      const newSec = await api.createSection(songId, {
-        section_name: sec.section_name,
-        section_order: 0,
-        content: sec.content,
-      });
-      created.push({ id: newSec.id });
+    const created = [];
+    for (const sec of currentSections) {
+        if (sec.id) {
+            await api.updateSection(sec.id, { section_name: sec.section_name, content: sec.content });
+            created.push({ id: sec.id });
+        } else {
+            const newSec = await api.createSection(songId, {
+                section_name: sec.section_name,
+                section_order: 0,
+                content: sec.content,
+            });
+            created.push({ id: newSec.id });
+        }
     }
-  }
 
-  const order = created.map((s, i) => ({ id: s.id, section_order: i }));
-  await api.reorderSections(songId, order);
+    const order = created.map((s, i) => ({ id: s.id, section_order: i }));
+    await api.reorderSections(songId, order);
 }
 
 // ---------------------------------------------------------------------
@@ -1053,13 +1178,13 @@ async function syncSections(songId, originalSections, currentSections) {
 // ---------------------------------------------------------------------
 
 async function viewSetlistSongReader(content, setlistSongId) {
-  let semitones = 0;
-  const data = await api.viewSetlistSong(setlistSongId, semitones);
-  renderReader(content, data, semitones);
+    let semitones = 0;
+    const data = await api.viewSetlistSong(setlistSongId, semitones);
+    renderReader(content, data, semitones);
 }
 
 function renderReader(content, data, semitones) {
-  content.innerHTML = `
+    content.innerHTML = `
     <div class="reader-header">
       <span class="back" id="back-to-setlist">← ${escapeHtml(data.setlist_name)}</span>
       <h1>${escapeHtml(data.title)}${data.song_deleted ? ' <span class="faint" style="font-size:0.9rem;">(removed from library)</span>' : ""}</h1>
@@ -1085,18 +1210,18 @@ function renderReader(content, data, semitones) {
 
     <div id="sections-display">
       ${data.sections.length
-      ? data.sections.map(renderReaderSection).join("")
-      : `<div class="empty-state"><p>No lyrics/chords added for this song yet.</p></div>`
-    }
+            ? data.sections.map(renderReaderSection).join("")
+            : `<div class="empty-state"><p>No lyrics/chords added for this song yet.</p></div>`
+        }
     </div>
 
     ${data.notes
-      ? `<div class="notes-block">
+            ? `<div class="notes-block">
              <div class="section-name">Notes</div>
              <pre>${escapeHtml(data.notes)}</pre>
            </div>`
-      : ""
-    }
+            : ""
+        }
 
     <div class="btn-row" style="margin-top:30px;">
       <button class="btn" id="btn-edit-arrangement">${data.has_custom_arrangement ? "Edit Custom Arrangement" : "Customize for This Setlist"}</button>
@@ -1104,55 +1229,55 @@ function renderReader(content, data, semitones) {
     </div>
   `;
 
-  content.querySelector("#back-to-setlist").addEventListener("click", () => navigate(`/setlists/${data.setlist_id}`));
+    content.querySelector("#back-to-setlist").addEventListener("click", () => navigate(`/setlists/${data.setlist_id}`));
 
-  content.querySelector("#transpose-up")?.addEventListener("click", async () => {
-    const fresh = await api.viewSetlistSong(data.id, Math.min(11, semitones + 1));
-    renderReader(content, fresh, fresh.semitones);
-  });
-  content.querySelector("#transpose-down")?.addEventListener("click", async () => {
-    const fresh = await api.viewSetlistSong(data.id, Math.max(-11, semitones - 1));
-    renderReader(content, fresh, fresh.semitones);
-  });
-  content.querySelector("#transpose-reset")?.addEventListener("click", async () => {
-    const fresh = await api.viewSetlistSong(data.id, 0);
-    renderReader(content, fresh, 0);
-  });
+    content.querySelector("#transpose-up")?.addEventListener("click", async () => {
+        const fresh = await api.viewSetlistSong(data.id, Math.min(11, semitones + 1));
+        renderReader(content, fresh, fresh.semitones);
+    });
+    content.querySelector("#transpose-down")?.addEventListener("click", async () => {
+        const fresh = await api.viewSetlistSong(data.id, Math.max(-11, semitones - 1));
+        renderReader(content, fresh, fresh.semitones);
+    });
+    content.querySelector("#transpose-reset")?.addEventListener("click", async () => {
+        const fresh = await api.viewSetlistSong(data.id, 0);
+        renderReader(content, fresh, 0);
+    });
 
-  content.querySelector("#btn-edit-arrangement").addEventListener("click", () =>
-    openArrangementEditor(data, content)
-  );
-  content.querySelector("#btn-reset-arrangement")?.addEventListener("click", async () => {
-    const ok = await confirmDialog(
-      "Reset to the master song's lyrics/chords? Your setlist-only edits for this song will be discarded.",
-      { confirmLabel: "Reset" }
+    content.querySelector("#btn-edit-arrangement").addEventListener("click", () =>
+        openArrangementEditor(data, content)
     );
-    if (!ok) return;
-    try {
-      await api.resetArrangement(data.id);
-      const fresh = await api.viewSetlistSong(data.id, 0);
-      renderReader(content, fresh, 0);
-      toast("Reverted to master song.", "success");
-    } catch (err) {
-      toast(errorMessage(err), "error");
-    }
-  });
+    content.querySelector("#btn-reset-arrangement")?.addEventListener("click", async () => {
+        const ok = await confirmDialog(
+            "Reset to the master song's lyrics/chords? Your setlist-only edits for this song will be discarded.",
+            { confirmLabel: "Reset" }
+        );
+        if (!ok) return;
+        try {
+            await api.resetArrangement(data.id);
+            const fresh = await api.viewSetlistSong(data.id, 0);
+            renderReader(content, fresh, 0);
+            toast("Reverted to master song.", "success");
+        } catch (err) {
+            toast(errorMessage(err), "error");
+        }
+    });
 }
 
 function renderReaderSection(section) {
-  return `
+    return `
     <div class="section-block">
       <div class="section-name">${escapeHtml(section.section_name)}</div>
       ${section.lines
-      .map((line) => {
-        if (!line.chord_line && !line.lyric_line) return `<div class="chord-line-pair">&nbsp;</div>`;
-        return `
+            .map((line) => {
+                if (!line.chord_line && !line.lyric_line) return `<div class="chord-line-pair">&nbsp;</div>`;
+                return `
           <div class="chord-line-pair">
             <div class="chords">${line.has_chords ? escapeHtml(line.chord_line) : ""}</div>
             <div class="lyrics">${escapeHtml(line.lyric_line) || "&nbsp;"}</div>
           </div>`;
-      })
-      .join("")}
+            })
+            .join("")}
     </div>
   `;
 }
@@ -1160,12 +1285,12 @@ function renderReaderSection(section) {
 // --- Arrangement editor: setlist-only lyrics/chords override ---
 
 function openArrangementEditor(data, content) {
-  let sections = data.sections.length
-    ? data.sections.map((s) => ({ ...s, _localId: "a" + (s.id || Math.random()) }))
-    : [{ section_name: "Verse 1", section_order: 0, raw_content: "", _localId: "anew1" }];
+    let sections = data.sections.length
+        ? data.sections.map((s) => ({ ...s, _localId: "a" + (s.id || Math.random()) }))
+        : [{ section_name: "Verse 1", section_order: 0, raw_content: "", _localId: "anew1" }];
 
-  const overlay = openModal(
-    `
+    const overlay = openModal(
+        `
     <div class="chordpro-help" style="margin-bottom:14px;">
       Editing here only affects <strong>this setlist</strong> - the master song in your library stays unchanged.
       Use <code>[E]</code> style brackets right before a lyric to place a chord above it.
@@ -1177,15 +1302,15 @@ function openArrangementEditor(data, content) {
       <button type="button" class="btn btn-primary" id="arr-save">Save for This Setlist</button>
     </div>
   `,
-    {
-      title: "Customize Arrangement",
-      onMount: (modalOverlay) => {
-        const sectionsEl = modalOverlay.querySelector("#arr-sections");
+        {
+            title: "Customize Arrangement",
+            onMount: (modalOverlay) => {
+                const sectionsEl = modalOverlay.querySelector("#arr-sections");
 
-        function render() {
-          sectionsEl.innerHTML = sections
-            .map(
-              (sec, i) => `
+                function render() {
+                    sectionsEl.innerHTML = sections
+                        .map(
+                            (sec, i) => `
             <div class="section-editor" data-local-id="${sec._localId}">
               <div class="section-editor-head">
                 <input type="text" data-field="name" value="${escapeHtml(sec.section_name)}" placeholder="Section name" />
@@ -1196,60 +1321,60 @@ function openArrangementEditor(data, content) {
               <textarea data-field="content" rows="4">${escapeHtml(sec.raw_content || "")}</textarea>
             </div>
           `
-            )
-            .join("");
+                        )
+                        .join("");
 
-          sectionsEl.querySelectorAll(".section-editor").forEach((el) => {
-            const localId = el.getAttribute("data-local-id");
-            const sec = sections.find((s) => s._localId === localId);
-            el.querySelector('[data-field="name"]').addEventListener("input", (e) => {
-              sec.section_name = e.target.value;
-            });
-            el.querySelector('[data-field="content"]').addEventListener("input", (e) => {
-              sec.raw_content = e.target.value;
-            });
-            el.querySelector("[data-remove]").addEventListener("click", () => {
-              sections = sections.filter((s) => s._localId !== localId);
-              render();
-            });
-            el.querySelectorAll("[data-move]").forEach((btn) =>
-              btn.addEventListener("click", () => {
-                const idx = sections.findIndex((s) => s._localId === localId);
-                const dir = btn.getAttribute("data-move") === "up" ? -1 : 1;
-                const swapIdx = idx + dir;
-                if (swapIdx < 0 || swapIdx >= sections.length) return;
-                [sections[idx], sections[swapIdx]] = [sections[swapIdx], sections[idx]];
+                    sectionsEl.querySelectorAll(".section-editor").forEach((el) => {
+                        const localId = el.getAttribute("data-local-id");
+                        const sec = sections.find((s) => s._localId === localId);
+                        el.querySelector('[data-field="name"]').addEventListener("input", (e) => {
+                            sec.section_name = e.target.value;
+                        });
+                        el.querySelector('[data-field="content"]').addEventListener("input", (e) => {
+                            sec.raw_content = e.target.value;
+                        });
+                        el.querySelector("[data-remove]").addEventListener("click", () => {
+                            sections = sections.filter((s) => s._localId !== localId);
+                            render();
+                        });
+                        el.querySelectorAll("[data-move]").forEach((btn) =>
+                            btn.addEventListener("click", () => {
+                                const idx = sections.findIndex((s) => s._localId === localId);
+                                const dir = btn.getAttribute("data-move") === "up" ? -1 : 1;
+                                const swapIdx = idx + dir;
+                                if (swapIdx < 0 || swapIdx >= sections.length) return;
+                                [sections[idx], sections[swapIdx]] = [sections[swapIdx], sections[idx]];
+                                render();
+                            })
+                        );
+                    });
+                }
+
                 render();
-              })
-            );
-          });
+
+                modalOverlay.querySelector("#arr-add-section").addEventListener("click", () => {
+                    sections.push({ section_name: "New Section", raw_content: "", _localId: "anew" + Date.now() });
+                    render();
+                });
+
+                modalOverlay.querySelector("#arr-save").addEventListener("click", async () => {
+                    const payload = sections.map((s, i) => ({
+                        section_name: s.section_name || "Section",
+                        section_order: i,
+                        content: s.raw_content || "",
+                    }));
+                    try {
+                        await api.setCustomArrangement(data.id, payload);
+                        closeModal();
+                        const fresh = await api.viewSetlistSong(data.id, data.semitones);
+                        renderReader(content, fresh, fresh.semitones);
+                        toast("Arrangement saved for this setlist.", "success");
+                    } catch (err) {
+                        toast(errorMessage(err), "error");
+                    }
+                });
+            },
         }
-
-        render();
-
-        modalOverlay.querySelector("#arr-add-section").addEventListener("click", () => {
-          sections.push({ section_name: "New Section", raw_content: "", _localId: "anew" + Date.now() });
-          render();
-        });
-
-        modalOverlay.querySelector("#arr-save").addEventListener("click", async () => {
-          const payload = sections.map((s, i) => ({
-            section_name: s.section_name || "Section",
-            section_order: i,
-            content: s.raw_content || "",
-          }));
-          try {
-            await api.setCustomArrangement(data.id, payload);
-            closeModal();
-            const fresh = await api.viewSetlistSong(data.id, data.semitones);
-            renderReader(content, fresh, fresh.semitones);
-            toast("Arrangement saved for this setlist.", "success");
-          } catch (err) {
-            toast(errorMessage(err), "error");
-          }
-        });
-      },
-    }
-  );
-  return overlay;
+    );
+    return overlay;
 }
