@@ -1,11 +1,11 @@
 // Worship Setlist app - vanilla JS single-page app.
 // Hash-based routing, fetch-based API calls (see api.js), no build step -
 // this file is served directly by the FastAPI backend.
-
+ 
 // ---------------------------------------------------------------------
 // Utilities
 // ---------------------------------------------------------------------
-
+ 
 function escapeHtml(str) {
   if (str === null || str === undefined) return "";
   return String(str)
@@ -15,27 +15,27 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
 }
-
+ 
 function formatDateDisplay(dateStr) {
   if (!dateStr) return "";
   const [y, m, d] = dateStr.split("-").map(Number);
   const dt = new Date(y, m - 1, d);
   return dt.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
 }
-
+ 
 function formatDateShort(dateStr) {
   if (!dateStr) return "";
   const [y, m, d] = dateStr.split("-").map(Number);
   const dt = new Date(y, m - 1, d);
   return dt.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
-
+ 
 function todayIso() {
   const d = new Date();
   const pad = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
-
+ 
 function debounce(fn, wait) {
   let t;
   return (...args) => {
@@ -43,11 +43,11 @@ function debounce(fn, wait) {
     t = setTimeout(() => fn(...args), wait);
   };
 }
-
+ 
 function navigate(path) {
   window.location.hash = "#" + path;
 }
-
+ 
 // ---------------------------------------------------------------------
 // "Paste Whole Song" parser
 // ---------------------------------------------------------------------
@@ -55,22 +55,22 @@ function navigate(path) {
 // chords, directly above the lyric line it belongs to, with sections
 // marked by a standalone [Bracketed Label] line) into this app's inline
 // [G]word format, split into separate sections automatically.
-
+ 
 const CHORD_TOKEN_RE =
-  /^[A-G][#b]?(?:maj7|maj9|maj13|maj|m7b5|m7|m9|m6|m11|m13|min7|min9|min|sus2|sus4|add9|add11|add2|dim7|dim|aug|2|4|5|6|7|9|11|13)*(?:\/[A-G][#b]?)?$/;
-
+  /^[A-G][#b]?(?:maj7|maj9|maj13|maj|m7b5|m9|m7|m6|m11|m13|min7|min9|min|m|sus2|sus4|add9|add11|add2|dim7|dim|aug|2|4|5|6|7|9|11|13)*(?:\/[A-G][#b]?)?$/;
+ 
 function isChordLine(line) {
   const trimmed = line.trim();
   if (!trimmed) return false;
   const tokens = trimmed.split(/\s+/);
   return tokens.every((t) => CHORD_TOKEN_RE.test(t));
 }
-
+ 
 function isSectionHeaderLine(line) {
   const m = line.trim().match(/^\[([^\]]+)\]$/);
   return m ? m[1].trim() : null;
 }
-
+ 
 function buildInlineChordLine(chordLine, lyricLine) {
   const tokens = [];
   const re = /\S+/g;
@@ -86,43 +86,58 @@ function buildInlineChordLine(chordLine, lyricLine) {
   }
   return result;
 }
-
+ 
 function parseFullSongText(text) {
   const rawLines = text.replace(/\r\n/g, "\n").split("\n");
   const sections = [];
   let current = { section_name: "Verse 1", lines: [] };
-
-  for (let i = 0; i < rawLines.length; i++) {
+ 
+  let i = 0;
+  while (i < rawLines.length) {
     const line = rawLines[i];
     const headerName = isSectionHeaderLine(line);
     if (headerName) {
       if (current.lines.length) sections.push(current);
       current = { section_name: headerName, lines: [] };
+      i++;
       continue;
     }
     if (isChordLine(line)) {
-      const nextLine = rawLines[i + 1];
-      const nextIsLyric =
-        nextLine !== undefined &&
-        nextLine.trim() !== "" &&
-        !isChordLine(nextLine) &&
-        !isSectionHeaderLine(nextLine);
-      if (nextIsLyric) {
-        current.lines.push(buildInlineChordLine(line, nextLine));
-        i++;
+      // Look past any blank lines for the lyric line this chord line
+      // belongs to - chord sheets often separate them with a blank line.
+      let j = i + 1;
+      while (j < rawLines.length && rawLines[j].trim() === "") j++;
+      const lookahead = j < rawLines.length ? rawLines[j] : undefined;
+      const lookaheadIsLyric =
+        lookahead !== undefined && !isChordLine(lookahead) && !isSectionHeaderLine(lookahead);
+ 
+      if (lookaheadIsLyric) {
+        current.lines.push(buildInlineChordLine(line, lookahead));
+        i = j + 1; // consume the chord line, any blank lines, and the lyric line
         continue;
       }
-      current.lines.push(line.trim());
+ 
+      // Genuinely standalone/instrumental chord line (e.g. an intro) -
+      // wrap each token in brackets so it still renders with chord styling.
+      const wrapped = line
+        .trim()
+        .split(/\s+/)
+        .map((t) => `[${t}]`)
+        .join(" ");
+      current.lines.push(wrapped);
+      i++;
       continue;
     }
     if (line.trim() === "") {
       if (current.lines.length && current.lines[current.lines.length - 1] !== "") current.lines.push("");
+      i++;
       continue;
     }
     current.lines.push(line);
+    i++;
   }
-  sections.push(current);
-
+  if (current.lines.length) sections.push(current);
+ 
   return sections
     .filter((s) => s.lines.some((l) => l.trim() !== ""))
     .map((s, idx) => ({
@@ -132,7 +147,7 @@ function parseFullSongText(text) {
       _localId: "parsed" + idx + "_" + Date.now(),
     }));
 }
-
+ 
 // Reverse of parseFullSongText - reconstructs a single pasteable block of
 // text (with [Section] labels) from a saved sections array, so the paste
 // box can be pre-filled when editing something that already has content.
@@ -143,7 +158,7 @@ function sectionsToPasteText(sections) {
     .map((s) => `[${s.section_name}]\n${s.content || ""}`)
     .join("\n\n");
 }
-
+ 
 function toast(message, type = "info") {
   const container = document.getElementById("toast-container");
   const el = document.createElement("div");
@@ -156,15 +171,15 @@ function toast(message, type = "info") {
     setTimeout(() => el.remove(), 300);
   }, 3200);
 }
-
+ 
 function errorMessage(err) {
   return err && err.message ? err.message : "Something went wrong.";
 }
-
+ 
 // ---------------------------------------------------------------------
 // Modal helper
 // ---------------------------------------------------------------------
-
+ 
 function openModal(innerHtml, { onMount, title } = {}) {
   closeModal();
   const overlay = document.createElement("div");
@@ -184,12 +199,12 @@ function openModal(innerHtml, { onMount, title } = {}) {
   if (onMount) onMount(overlay);
   return overlay;
 }
-
+ 
 function closeModal() {
   const existing = document.getElementById("active-modal-overlay");
   if (existing) existing.remove();
 }
-
+ 
 function confirmDialog(message, { danger = true, confirmLabel = "Delete" } = {}) {
   return new Promise((resolve) => {
     const overlay = openModal(
@@ -212,11 +227,11 @@ function confirmDialog(message, { danger = true, confirmLabel = "Delete" } = {})
     });
   });
 }
-
+ 
 // ---------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------
-
+ 
 const routes = [
   { pattern: /^\/?$/, view: viewDashboard },
   { pattern: /^\/setlists$/, view: viewSetlistsList },
@@ -227,11 +242,11 @@ const routes = [
   { pattern: /^\/songs\/(\d+)\/edit$/, view: viewSongForm },
   { pattern: /^\/setlist-song\/(\d+)$/, view: viewSetlistSongReader },
 ];
-
+ 
 async function router() {
   const hash = window.location.hash.replace(/^#/, "") || "/";
   const path = hash.split("?")[0];
-
+ 
   for (const route of routes) {
     const match = path.match(route.pattern);
     if (match) {
@@ -255,7 +270,7 @@ async function router() {
   }
   navigate("/");
 }
-
+ 
 function updateNavActive(path) {
   let section = "dashboard";
   if (path.startsWith("/setlists")) section = "setlists";
@@ -264,18 +279,18 @@ function updateNavActive(path) {
     el.classList.toggle("active", el.getAttribute("data-nav") === section);
   });
 }
-
+ 
 window.addEventListener("hashchange", router);
 window.addEventListener("DOMContentLoaded", router);
-
+ 
 // ---------------------------------------------------------------------
 // Dashboard
 // ---------------------------------------------------------------------
-
+ 
 async function viewDashboard(content) {
   const setlists = await api.listSetlists();
   const recent = setlists.slice(0, 5);
-
+ 
   content.innerHTML = `
     <div class="page-title">
       <div>
@@ -283,13 +298,13 @@ async function viewDashboard(content) {
         <p class="muted" style="margin:0">Plan your next Sunday lineup.</p>
       </div>
     </div>
-
+ 
     <div class="btn-row" style="margin-bottom:28px;">
       <button class="btn btn-primary" id="btn-create-setlist">+ Create Setlist</button>
       <button class="btn" onclick="navigate('/setlists')">View Setlists</button>
       <button class="btn" onclick="navigate('/songs')">View Songs</button>
     </div>
-
+ 
     <h2>Recent Setlists</h2>
     <div id="recent-list">
       ${recent.length
@@ -302,13 +317,13 @@ async function viewDashboard(content) {
     }
     </div>
   `;
-
+ 
   const goCreate = () => navigate("/setlists/new");
   content.querySelector("#btn-create-setlist")?.addEventListener("click", goCreate);
   content.querySelector("#btn-create-setlist-empty")?.addEventListener("click", goCreate);
   bindSetlistCardEvents(content);
 }
-
+ 
 function renderSetlistCard(s) {
   return `
     <div class="list-card" data-setlist-id="${s.id}">
@@ -326,17 +341,17 @@ function renderSetlistCard(s) {
     </div>
   `;
 }
-
+ 
 function bindSetlistCardEvents(content) {
   content.querySelectorAll("[data-open-setlist]").forEach((el) => {
     el.addEventListener("click", () => navigate(`/setlists/${el.getAttribute("data-open-setlist")}`));
   });
 }
-
+ 
 // ---------------------------------------------------------------------
 // Setlists list
 // ---------------------------------------------------------------------
-
+ 
 async function viewSetlistsList(content) {
   content.innerHTML = `
     <div class="page-title">
@@ -348,11 +363,11 @@ async function viewSetlistsList(content) {
     </div>
     <div id="setlist-results"><div class="loading"><div class="spinner"></div></div></div>
   `;
-
+ 
   content.querySelector("#btn-new-setlist").addEventListener("click", () => navigate("/setlists/new"));
-
+ 
   const resultsEl = content.querySelector("#setlist-results");
-
+ 
   async function load(search) {
     const setlists = await api.listSetlists(search);
     if (!setlists.length) {
@@ -387,7 +402,7 @@ async function viewSetlistsList(content) {
     `
       )
       .join("");
-
+ 
     resultsEl.querySelectorAll("[data-open]").forEach((el) =>
       el.addEventListener("click", () => navigate(`/setlists/${el.getAttribute("data-open")}`))
     );
@@ -407,19 +422,19 @@ async function viewSetlistsList(content) {
       })
     );
   }
-
+ 
   content.querySelector("#setlist-search").addEventListener(
     "input",
     debounce((e) => load(e.target.value.trim()), 300)
   );
-
+ 
   await load();
 }
-
+ 
 // ---------------------------------------------------------------------
 // Create Setlist
 // ---------------------------------------------------------------------
-
+ 
 async function viewSetlistCreate(content) {
   content.innerHTML = `
     <div class="page-title"><h1>Create Setlist</h1></div>
@@ -444,7 +459,7 @@ async function viewSetlistCreate(content) {
       </form>
     </div>
   `;
-
+ 
   content.querySelector("#btn-cancel").addEventListener("click", () => navigate("/setlists"));
   content.querySelector("#setlist-form").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -467,19 +482,19 @@ async function viewSetlistCreate(content) {
     }
   });
 }
-
+ 
 // ---------------------------------------------------------------------
 // Setlist detail
 // ---------------------------------------------------------------------
-
+ 
 async function viewSetlistDetail(content, setlistId) {
   const setlist = await api.getSetlist(setlistId);
   renderSetlistDetail(content, setlist);
 }
-
+ 
 function renderSetlistDetail(content, setlist) {
   const songs = [...setlist.songs].sort((a, b) => a.song_order - b.song_order);
-
+ 
   content.innerHTML = `
     <div class="page-title">
       <div>
@@ -492,7 +507,7 @@ function renderSetlistDetail(content, setlist) {
         <button class="btn btn-danger" id="btn-delete-setlist">Delete</button>
       </div>
     </div>
-
+ 
     <h2>Songs</h2>
     <div id="song-list">
       ${songs.length
@@ -505,11 +520,11 @@ function renderSetlistDetail(content, setlist) {
     </div>
     <button class="btn btn-primary btn-block" id="btn-add-song" style="margin-top:10px;">+ Add Song</button>
   `;
-
+ 
   content.querySelector("#back-to-setlists").addEventListener("click", () => navigate("/setlists"));
-
+ 
   content.querySelector("#btn-edit-setlist").addEventListener("click", () => openEditSetlistModal(setlist));
-
+ 
   content.querySelector("#btn-delete-setlist").addEventListener("click", async () => {
     const ok = await confirmDialog(`Delete "${setlist.name}"? This cannot be undone.`);
     if (!ok) return;
@@ -521,17 +536,17 @@ function renderSetlistDetail(content, setlist) {
       toast(errorMessage(err), "error");
     }
   });
-
+ 
   content.querySelector("#btn-add-song").addEventListener("click", () => openAddSongModal(setlist, content));
-
+ 
   bindSetlistSongRowEvents(content, setlist);
 }
-
+ 
 function renderSetlistSongRow(s, index, total) {
   const keyLabel = s.key_override && s.original_key && s.key_override !== s.original_key
     ? `${escapeHtml(s.key)} <span class="faint">(orig ${escapeHtml(s.original_key)})</span>`
     : escapeHtml(s.key || "—");
-
+ 
   return `
     <div class="song-row" data-row-id="${s.id}">
       <div class="num">${String(index + 1).padStart(2, "0")}</div>
@@ -553,19 +568,19 @@ function renderSetlistSongRow(s, index, total) {
     </div>
   `;
 }
-
+ 
 function bindSetlistSongRowEvents(content, setlist) {
   content.querySelectorAll("[data-open-song]").forEach((el) =>
     el.addEventListener("click", () => navigate(`/setlist-song/${el.getAttribute("data-open-song")}`))
   );
-
+ 
   content.querySelectorAll("[data-edit-row]").forEach((el) =>
     el.addEventListener("click", () => {
       const row = setlist.songs.find((s) => String(s.id) === el.getAttribute("data-edit-row"));
       openEditSetlistSongModal(row, setlist, content);
     })
   );
-
+ 
   content.querySelectorAll("[data-remove-row]").forEach((el) =>
     el.addEventListener("click", async () => {
       const id = el.getAttribute("data-remove-row");
@@ -582,7 +597,7 @@ function bindSetlistSongRowEvents(content, setlist) {
       }
     })
   );
-
+ 
   content.querySelectorAll("[data-move-up]").forEach((el) =>
     el.addEventListener("click", () => moveSetlistSong(setlist, content, el.getAttribute("data-move-up"), -1))
   );
@@ -590,16 +605,16 @@ function bindSetlistSongRowEvents(content, setlist) {
     el.addEventListener("click", () => moveSetlistSong(setlist, content, el.getAttribute("data-move-down"), 1))
   );
 }
-
+ 
 async function moveSetlistSong(setlist, content, songRowId, direction) {
   const songs = [...setlist.songs].sort((a, b) => a.song_order - b.song_order);
   const idx = songs.findIndex((s) => String(s.id) === String(songRowId));
   const swapWith = idx + direction;
   if (swapWith < 0 || swapWith >= songs.length) return;
-
+ 
   [songs[idx], songs[swapWith]] = [songs[swapWith], songs[idx]];
   const order = songs.map((s, i) => ({ id: s.id, song_order: i }));
-
+ 
   try {
     await api.reorderSetlistSongs(setlist.id, order);
     const fresh = await api.getSetlist(setlist.id);
@@ -608,7 +623,7 @@ async function moveSetlistSong(setlist, content, songRowId, direction) {
     toast(errorMessage(err), "error");
   }
 }
-
+ 
 function openEditSetlistModal(setlist) {
   openModal(
     `
@@ -654,7 +669,7 @@ function openEditSetlistModal(setlist) {
     }
   );
 }
-
+ 
 function openEditSetlistSongModal(row, setlist, content) {
   openModal(
     `
@@ -706,7 +721,7 @@ function openEditSetlistSongModal(row, setlist, content) {
     }
   );
 }
-
+ 
 function openAddSongModal(setlist, content) {
   openModal(
     `
@@ -717,7 +732,7 @@ function openAddSongModal(setlist, content) {
       title: "Add Song",
       onMount: async (overlay) => {
         const resultsEl = overlay.querySelector("#picker-results");
-
+ 
         async function load(search) {
           const songs = await api.listSongs(search);
           if (!songs.length) {
@@ -744,7 +759,7 @@ function openAddSongModal(setlist, content) {
           `
             )
             .join("");
-
+ 
           resultsEl.querySelectorAll("[data-add]").forEach((btn) =>
             btn.addEventListener("click", async () => {
               btn.disabled = true;
@@ -782,22 +797,22 @@ function openAddSongModal(setlist, content) {
             })
           );
         }
-
+ 
         overlay.querySelector("#picker-search").addEventListener(
           "input",
           debounce((e) => load(e.target.value.trim()), 300)
         );
-
+ 
         await load();
       },
     }
   );
 }
-
+ 
 // ---------------------------------------------------------------------
 // Songs list (library)
 // ---------------------------------------------------------------------
-
+ 
 async function viewSongsList(content) {
   content.innerHTML = `
     <div class="page-title">
@@ -809,10 +824,10 @@ async function viewSongsList(content) {
     </div>
     <div id="song-results"><div class="loading"><div class="spinner"></div></div></div>
   `;
-
+ 
   content.querySelector("#btn-new-song").addEventListener("click", () => navigate("/songs/new"));
   const resultsEl = content.querySelector("#song-results");
-
+ 
   async function load(search) {
     const songs = await api.listSongs(search);
     if (!songs.length) {
@@ -848,11 +863,11 @@ async function viewSongsList(content) {
     `
       )
       .join("");
-
+ 
     resultsEl.querySelectorAll("[data-open]").forEach((el) =>
       el.addEventListener("click", () => navigate(`/songs/${el.getAttribute("data-open")}/edit`))
     );
-
+ 
     resultsEl.querySelectorAll("[data-delete]").forEach((el) =>
       el.addEventListener("click", async (e) => {
         e.stopPropagation();
@@ -886,27 +901,27 @@ async function viewSongsList(content) {
       })
     );
   }
-
+ 
   content.querySelector("#song-search").addEventListener(
     "input",
     debounce((e) => load(e.target.value.trim()), 300)
   );
-
+ 
   await load();
 }
-
+ 
 // ---------------------------------------------------------------------
 // Song create / edit form (single paste box - sections come from
 // [Bracket] labels only, no manual per-section UI)
 // ---------------------------------------------------------------------
-
+ 
 async function viewSongForm(content, songId) {
   const isEdit = !!songId;
   let song = null;
   if (isEdit) song = await api.getSong(songId);
-
+ 
   const initialPasteText = isEdit ? sectionsToPasteText(song.sections) : "";
-
+ 
   content.innerHTML = `
     <div class="page-title">
       <div>
@@ -915,7 +930,7 @@ async function viewSongForm(content, songId) {
       </div>
       ${isEdit ? `<button class="btn btn-danger" id="btn-delete-song">Delete Song</button>` : ""}
     </div>
-
+ 
     <form id="song-form">
       <div class="card" style="margin-bottom:20px;">
         <div class="field">
@@ -943,7 +958,7 @@ async function viewSongForm(content, songId) {
           </div>
         </div>
       </div>
-
+ 
       <h2 style="margin-bottom:12px;">Lyrics &amp; Chords</h2>
       <div class="chordpro-help">
         Paste the whole song here - chords on their own line, directly above the lyric line, just
@@ -953,21 +968,21 @@ async function viewSongForm(content, songId) {
       </div>
       <textarea id="full-song-textarea" rows="20" style="width:100%; font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace; font-size:0.9rem; margin-top:10px; background:var(--bg-elevated); border:1px solid var(--border); color:var(--text); border-radius:9px; padding:14px;" placeholder="[Intro]
 G   D   Em   C
-
+ 
 [Verse 1]
      G                   Em7
 The splendor of a King, clothed in majesty">${escapeHtml(initialPasteText)}</textarea>
-
+ 
       <div class="btn-row" style="justify-content:flex-end; margin-top:24px;">
         <button type="button" class="btn" id="btn-cancel">Cancel</button>
         <button type="submit" class="btn btn-primary">${isEdit ? "Save Changes" : "Create Song"}</button>
       </div>
     </form>
   `;
-
+ 
   content.querySelector("#back-link").addEventListener("click", () => navigate("/songs"));
   content.querySelector("#btn-cancel").addEventListener("click", () => navigate("/songs"));
-
+ 
   if (isEdit) {
     content.querySelector("#btn-delete-song").addEventListener("click", async () => {
       const ok = await confirmDialog(`Delete "${song.title}"? This cannot be undone.`);
@@ -997,7 +1012,7 @@ The splendor of a King, clothed in majesty">${escapeHtml(initialPasteText)}</tex
       }
     });
   }
-
+ 
   content.querySelector("#song-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const title = content.querySelector("#f-title").value.trim();
@@ -1012,13 +1027,13 @@ The splendor of a King, clothed in majesty">${escapeHtml(initialPasteText)}</tex
       bpm: content.querySelector("#f-bpm").value ? Number(content.querySelector("#f-bpm").value) : null,
       time_signature: content.querySelector("#f-ts").value.trim() || "4/4",
     };
-
+ 
     const rawText = content.querySelector("#full-song-textarea").value;
     const parsedSections = rawText.trim() ? parseFullSongText(rawText) : [];
-
+ 
     const submitBtn = content.querySelector("button[type=submit]");
     submitBtn.disabled = true;
-
+ 
     try {
       let savedSong;
       if (isEdit) {
@@ -1040,14 +1055,14 @@ The splendor of a King, clothed in majesty">${escapeHtml(initialPasteText)}</tex
     }
   });
 }
-
+ 
 // Replaces all of a song's sections with a freshly parsed set (from the
 // paste box). Since the box is the single source of truth, this simply
 // deletes the old sections and creates the new ones, rather than trying
 // to diff them line by line.
 async function replaceSongSections(songId, originalSections, parsedSections) {
   await Promise.all(originalSections.map((s) => api.deleteSection(s.id)));
-
+ 
   const createdIds = [];
   for (const sec of parsedSections) {
     const newSec = await api.createSection(songId, {
@@ -1057,17 +1072,17 @@ async function replaceSongSections(songId, originalSections, parsedSections) {
     });
     createdIds.push(newSec.id);
   }
-
+ 
   if (createdIds.length) {
     const order = createdIds.map((id, i) => ({ id, section_order: i }));
     await api.reorderSections(songId, order);
   }
 }
-
+ 
 // ---------------------------------------------------------------------
 // Setlist-song reader (the main "songbook" view with transpose)
 // ---------------------------------------------------------------------
-
+ 
 async function viewSetlistSongReader(content, setlistSongId) {
   const data = await api.viewSetlistSong(setlistSongId, 0);
   let songList = [];
@@ -1080,18 +1095,18 @@ async function viewSetlistSongReader(content, setlistSongId) {
   }
   renderReader(content, data, 0, songList);
 }
-
+ 
 function renderReader(content, data, semitones, songList = []) {
   const idx = songList.findIndex((s) => s.id === data.id);
   const prevSong = idx > 0 ? songList[idx - 1] : null;
   const nextSong = idx >= 0 && idx < songList.length - 1 ? songList[idx + 1] : null;
-
+ 
   content.innerHTML = `
     <div class="reader-header">
       <span class="back" id="back-to-setlist">← ${escapeHtml(data.setlist_name)}</span>
       <h1>${escapeHtml(data.title)}${data.song_deleted ? ' <span class="faint" style="font-size:0.9rem;">(removed from library)</span>' : ""}</h1>
       ${data.artist ? `<div class="artist">${escapeHtml(data.artist)}</div>` : ""}
-
+ 
       <div class="reader-controls">
         <div class="transpose-control">
           <button id="transpose-down" ${!data.base_key ? "disabled" : ""} aria-label="Transpose down">−</button>
@@ -1108,7 +1123,7 @@ function renderReader(content, data, semitones, songList = []) {
           ${data.has_custom_arrangement ? `<span class="pill">Custom arrangement</span>` : ""}
         </div>
       </div>
-
+ 
       ${
         songList.length > 1
           ? `<div class="btn-row" style="margin-top:14px; justify-content:space-between; align-items:center;">
@@ -1119,14 +1134,14 @@ function renderReader(content, data, semitones, songList = []) {
           : ""
       }
     </div>
-
+ 
     <div id="sections-display">
       ${data.sections.length
       ? data.sections.map(renderReaderSection).join("")
       : `<div class="empty-state"><p>No lyrics/chords added for this song yet.</p></div>`
     }
     </div>
-
+ 
     ${data.notes
       ? `<div class="notes-block">
              <div class="section-name">Notes</div>
@@ -1134,22 +1149,22 @@ function renderReader(content, data, semitones, songList = []) {
            </div>`
       : ""
     }
-
+ 
     <div class="btn-row" style="margin-top:30px;">
       <button class="btn" id="btn-edit-arrangement">${data.has_custom_arrangement ? "Edit Custom Arrangement" : "Customize for This Setlist"}</button>
       ${data.has_custom_arrangement ? `<button class="btn btn-ghost" id="btn-reset-arrangement">Reset to Master Song</button>` : ""}
     </div>
   `;
-
+ 
   content.querySelector("#back-to-setlist").addEventListener("click", () => navigate(`/setlists/${data.setlist_id}`));
-
+ 
   content.querySelector("#btn-prev-song")?.addEventListener("click", () => {
     if (prevSong) navigate(`/setlist-song/${prevSong.id}`);
   });
   content.querySelector("#btn-next-song")?.addEventListener("click", () => {
     if (nextSong) navigate(`/setlist-song/${nextSong.id}`);
   });
-
+ 
   content.querySelector("#transpose-up")?.addEventListener("click", async () => {
     const fresh = await api.viewSetlistSong(data.id, Math.min(11, semitones + 1));
     renderReader(content, fresh, fresh.semitones, songList);
@@ -1162,7 +1177,7 @@ function renderReader(content, data, semitones, songList = []) {
     const fresh = await api.viewSetlistSong(data.id, 0);
     renderReader(content, fresh, 0, songList);
   });
-
+ 
   content.querySelector("#btn-edit-arrangement").addEventListener("click", () =>
     openArrangementEditor(data, content, songList)
   );
@@ -1182,7 +1197,7 @@ function renderReader(content, data, semitones, songList = []) {
     }
   });
 }
-
+ 
 function renderReaderSection(section) {
   return `
     <div class="section-block">
@@ -1200,15 +1215,15 @@ function renderReaderSection(section) {
     </div>
   `;
 }
-
+ 
 // --- Arrangement editor: setlist-only lyrics/chords override, same
 // single-paste-box approach as the main song form. ---
-
+ 
 function openArrangementEditor(data, content, songList) {
   const initialText = data.sections.length
     ? data.sections.map((s) => `[${s.section_name}]\n${s.raw_content || ""}`).join("\n\n")
     : "";
-
+ 
   const overlay = openModal(
     `
     <div class="chordpro-help" style="margin-bottom:14px;">
@@ -1251,3 +1266,4 @@ The splendor of a King, clothed in majesty">${escapeHtml(initialText)}</textarea
   );
   return overlay;
 }
+ 
